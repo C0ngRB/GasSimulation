@@ -1,0 +1,184 @@
+#include "GaussianPlumeModel.h"
+
+#include <algorithm>
+#include <cmath>
+
+static inline double deg2rad(double d) { return d * M_PI / 180.0; }
+
+double GaussianPlumeModel::wrapAngleDeg(double a)
+{
+    while (a >= 180.0) a -= 360.0;
+    while (a < -180.0) a += 360.0;
+    return a;
+}
+
+double GaussianPlumeModel::sigmaYPasquillD(double x_m)
+{
+    const double x = std::max(1.0, x_m);
+    return 0.08 * x * std::pow(1.0 + 0.0001 * x, -0.5);
+}
+
+double GaussianPlumeModel::sigmaZPasquillD(double x_m)
+{
+    const double x = std::max(1.0, x_m);
+    return 0.06 * x * std::pow(1.0 + 0.0015 * x, -0.5);
+}
+
+void GaussianPlumeModel::setEffectiveWind(double speed, double dirDeg)
+{
+    windSpeedEff_ = std::max(0.0, speed);
+    windDirEffDeg_ = wrapAngleDeg(dirDeg);
+
+    const double th = deg2rad(windDirEffDeg_);
+    u_ = windSpeedEff_ * std::cos(th);
+    v_ = windSpeedEff_ * std::sin(th);
+}
+
+void GaussianPlumeModel::refreshStochasticNow()
+{
+    double ws = params_.windSpeed_mps;
+    double wd = params_.windDir_deg;
+    double lr = params_.leakRate_kgps;
+
+    if (params_.noise.enabled)
+    {
+        const double z1 = norm_(rng_);
+        const double z2 = norm_(rng_);
+        const double z3 = norm_(rng_);
+
+        ws = params_.windSpeed_mps + z1 * params_.noise.windSpeedSigma_mps;
+        if (ws < 0.0) ws = 0.0;
+
+        wd = wrapAngleDeg(params_.windDir_deg + z2 * params_.noise.windDirSigma_deg);
+
+        const double rel = 1.0 + z3 * params_.noise.leakRelSigma;
+        lr = params_.leakRate_kgps * std::max(0.0, rel);
+    }
+
+    leakRateEff_ = std::max(0.0, lr);
+    setEffectiveWind(ws, wd);
+    nextNoiseUpdateT_ = t_ + std::max(1e-6, params_.noise.updateEvery_s);
+}
+
+void GaussianPlumeModel::updateStochasticIfNeeded()
+{
+    if (!params_.noise.enabled) return;
+    if (t_ + 1e-12 >= nextNoiseUpdateT_)
+        refreshStochasticNow();
+}
+
+bool GaussianPlumeModel::initialize(const Grid3D &g, const ITerrain *terr, const Params &p, std::string &err)
+{
+    (void)err;
+    grid_ = g;
+    terr_ = terr;
+    params_ = p;
+    t_ = 0.0;
+
+    if (params_.K_m2ps < 0.0)
+        params_.K_m2ps = 0.0;
+
+    rng_.seed(params_.noise.seed);
+    refreshStochasticNow();
+    return true;
+}
+
+void GaussianPlumeModel::reset()
+{
+    t_ = 0.0;
+    rng_.seed(params_.noise.seed);
+    refreshStochasticNow();
+}
+
+void GaussianPlumeModel::step()
+{
+    t_ += params_.dt_s;
+    updateStochasticIfNeeded();
+}
+
+double GaussianPlumeModel::time() const { return t_; }
+
+const Grid3D &GaussianPlumeModel::grid() const { return grid_; }
+GaussianPlumeModel::Params GaussianPlumeModel::params() const { return params_; }
+
+double GaussianPlumeModel::terrainHeight(double x, double y) const
+{
+    if (!terr_)
+        return 0.0;
+    return terr_->height(x, y);
+}
+
+double GaussianPlumeModel::concentrationAt(double x, double y, double z) const
+{
+    const double gx = params_.srcX_m;
+    const double gy = params_.srcY_m;
+    const double gz = params_.srcZ_m;
+
+    const double h = terrainHeight(x, y);
+    if (z < h)
+        return 0.0;
+
+    const double h0 = terrainHeight(gx, gy);
+
+    const double U = std::hypot(u_, v_);
+    if (U < 1e-9)
+        return 0.0;
+
+    const double dx = x - gx;
+    const double dy = y - gy;
+
+    const double ex = u_ / U;
+    const double ey = v_ / U;
+
+    const double xw = dx * ex + dy * ey;
+    const double yw = -dx * ey + dy * ex;
+    if (xw <= 1e-6)
+        return 0.0;
+
+    const double flightT = xw / U;
+    const double sigma0 = std::max(0.5 * params_.srcRadius_m, 0.1);
+    const double sigY_pg = sigmaYPasquillD(xw);
+    const double sigZ_pg = sigmaZPasquillD(xw);
+    const double sigK2 = 2.0 * std::max(0.0, params_.K_m2ps) * flightT;
+
+    const double sigY = std::sqrt(sigY_pg * sigY_pg + sigma0 * sigma0 + sigK2);
+    const double sigZ = std::sqrt(sigZ_pg * sigZ_pg + sigma0 * sigma0 + sigK2);
+
+    const double lam = std::max(0.0, params_.decay_1ps);
+    const double decay = (lam > 0.0) ? std::exp(-lam * flightT) : 1.0;
+
+    const double dy2 = yw * yw;
+    const double dz1 = z - gz;
+    const double gzMirror = 2.0 * h0 - gz;
+    const double dz2 = z - gzMirror;
+
+    const double norm = leakRateEff_ / (2.0 * M_PI * U * sigY * sigZ);
+    const double cross = std::exp(-0.5 * dy2 / (sigY * sigY));
+    const double vert1 = std::exp(-0.5 * dz1 * dz1 / (sigZ * sigZ));
+    const double vert2 = std::exp(-0.5 * dz2 * dz2 / (sigZ * sigZ));
+
+    const double c = norm * cross * (vert1 + vert2) * decay;
+    return std::max(0.0, c);
+}
+
+void GaussianPlumeModel::extractSliceXY(int k, std::vector<float> &out, float &maxC) const
+{
+    const int Nx = grid_.Nx;
+    const int Ny = grid_.Ny;
+    out.assign(static_cast<std::size_t>(Nx) * Ny, 0.0f);
+    maxC = 0.0f;
+
+    const double z = grid_.z(k);
+
+    for (int j = 0; j < Ny; ++j)
+    {
+        const double y = grid_.y(j);
+        for (int i = 0; i < Nx; ++i)
+        {
+            const double x = grid_.x(i);
+            const float cf = static_cast<float>(concentrationAt(x, y, z));
+            out[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * Nx] = cf;
+            maxC = std::max(maxC, cf);
+        }
+    }
+}
