@@ -37,7 +37,6 @@ public:
     double currentLeakRate() const override { return sourceController_.currentLeakRate(); }
 
     void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override;
-    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override;
 
 private:
     struct Puff

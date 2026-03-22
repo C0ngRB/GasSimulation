@@ -10,12 +10,8 @@
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QSizePolicy>
 
-#include <QDateTime>
 #include <QDir>
-#include <QFile>
 #include <QPainter>
-#include <QTextStream>
-#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
@@ -80,71 +76,9 @@ QString MainWindow::framesDir() const
     return QDir::current().filePath("outputs/frames");
 }
 
-QString MainWindow::logsDir() const
-{
-    return QDir::current().filePath("outputs/log");
-}
-
-QString MainWindow::createExperimentId() const
-{
-    const QString timePart = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmsszzz");
-    const QString uuidPart = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-    return QString("EXP-%1-%2").arg(timePart, uuidPart);
-}
-
-void MainWindow::appendExperimentLogLine(const QString& s)
-{
-    if (!currentExperimentActive_ || currentExperimentLogPath_.isEmpty()) {
-        return;
-    }
-
-    QFile f(currentExperimentLogPath_);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        return;
-    }
-
-    QTextStream ts(&f);
-    const QString t = QDateTime::currentDateTime().toString("HH:mm:ss");
-    ts << "- [" << t << "] " << s << "\n";
-}
-
-void MainWindow::startExperimentLogSession()
-{
-    QDir().mkpath(logsDir());
-
-    const QDateTime now = QDateTime::currentDateTime();
-    currentExperimentId_ = createExperimentId();
-    currentExperimentStartMinute_ = now.toString("yyyy-MM-dd HH:mm");
-    currentExperimentLogPath_ = QDir(logsDir()).filePath(currentExperimentId_ + ".md");
-    currentExperimentActive_ = true;
-
-    QFile f(currentExperimentLogPath_);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        QTextStream ts(&f);
-        ts << "# GasDispersionDesktop 实验日志\n\n";
-        ts << "- 实验编号：`" << currentExperimentId_ << "`\n";
-        ts << "- 开始时间：`" << currentExperimentStartMinute_ << "`\n";
-        ts << "- 计算模型：`" << cbModel_->currentText() << "`\n";
-        ts << "- 地形模式：`" << cbTerrainMode_->currentText() << "`\n";
-        ts << "- 日志文件：`" << currentExperimentLogPath_ << "`\n\n";
-        ts << "## 事件记录\n\n";
-    }
-
-    appendExperimentLogLine("实验日志会话已创建。");
-}
-
-void MainWindow::closeExperimentLogSession()
-{
-    currentExperimentActive_ = false;
-    currentExperimentId_.clear();
-    currentExperimentStartMinute_.clear();
-    currentExperimentLogPath_.clear();
-}
-
 void MainWindow::appendLog(const QString& s)
 {
     log_->appendPlainText(s);
-    appendExperimentLogLine(s);
 }
 
 void MainWindow::updateDomainInfo()
@@ -388,16 +322,12 @@ MainWindow::MainWindow(QWidget* parent)
     cbExportTwoSlices_ = new QCheckBox("Export TWO slices per frame (zSlice + AGL)", gbTime);
     cbExportTwoSlices_->setChecked(true);
 
-    cbExportColumn_ = new QCheckBox("Export column integral (vertical integral)", gbTime);
-    cbExportColumn_->setChecked(true);
-
     timeForm->addRow("Total (s)", sbTotalTime_);
     timeForm->addRow("dt (s)", sbDt_);
     timeForm->addRow(cbAutoClampDt_);
     timeForm->addRow(cbExportCsv_);
     timeForm->addRow("Export interval (s)", sbExportInterval_);
     timeForm->addRow(cbExportTwoSlices_);
-    timeForm->addRow(cbExportColumn_);
 
     leftLayout->addWidget(gbTime);
 
@@ -482,7 +412,6 @@ MainWindow::MainWindow(QWidget* parent)
         running_ = false;
         timer_->stop();
         simReady_ = false;
-        closeExperimentLogSession();
         if (terrainPreviewReady_) renderTerrainOnly();
         appendLog("[Model] changed. Rebuild on next Run.");
     });
@@ -588,7 +517,6 @@ void MainWindow::onTerrainParamsChanged()
     timer_->stop();
     simReady_ = false;
     terrainPreviewReady_ = false;
-    closeExperimentLogSession();
 
     updateDomainInfo();
 }
@@ -954,7 +882,7 @@ void MainWindow::renderTerrainAndSlice()
     const double zAgl = aglSliceZ();
 
     status_->setText(
-        QString("SIM | model=%1 | t=%2 s | wind=%3 m/s @ %4 deg | leak=%5 | zEff=%6 (k=%7/%8) | sliceMax=%9 | srcZ=%10 | ground=%11 | zAGL=%12 | solve(last/avg)= %13 / %14 ms")
+        QString("SIM | model=%1 | t=%2 s | wind=%3 m/s @ %4 deg | leak=%5 | zEff=%6 (k=%7/%8) | sliceMax=%9 | srcZ=%10 | ground=%11 | zAGL=%12")
             .arg(modelName)
             .arg(engine_.time(), 0, 'f', 3)
             .arg(engine_.currentWindSpeed(), 0, 'f', 3)
@@ -965,9 +893,7 @@ void MainWindow::renderTerrainAndSlice()
             .arg(sliceMax_, 0, 'g', 6)
             .arg(sbSrcZ_->value(), 0, 'f', 2)
             .arg(gsrc, 0, 'f', 2)
-            .arg(zAgl, 0, 'f', 2)
-            .arg(engine_.lastSolveMs(), 0, 'f', 3)
-            .arg(engine_.averageSolveMs(), 0, 'f', 3));
+            .arg(zAgl, 0, 'f', 2));
 }
 
 void MainWindow::onSetSrcZFromGroundClicked()
@@ -1002,10 +928,6 @@ void MainWindow::onRunClicked()
         }
     }
 
-    if (!currentExperimentActive_) {
-        startExperimentLogSession();
-    }
-
     running_ = true;
     timer_->start();
     appendLog("[Run] start.");
@@ -1027,7 +949,6 @@ void MainWindow::onResetClicked()
     }
     simReady_ = false;
     appendLog("[Reset] done.");
-    closeExperimentLogSession();
     renderTerrainOnly();
 }
 
@@ -1041,11 +962,7 @@ void MainWindow::onTick()
     if (engine_.time() >= p.totalTime_s - 1e-12) {
         running_ = false;
         timer_->stop();
-        appendLog(QString("[Run] finished. solve steps=%1 | total solve=%2 ms | avg solve=%3 ms")
-                  .arg(static_cast<qulonglong>(engine_.solveStepCount()))
-                  .arg(engine_.totalSolveMs(), 0, 'f', 3)
-                  .arg(engine_.averageSolveMs(), 0, 'f', 3));
-        closeExperimentLogSession();
+        appendLog("[Run] finished.");
         renderTerrainAndSlice();
         return;
     }
@@ -1071,8 +988,6 @@ void MainWindow::onTick()
                 meta.dy = g.dy;
                 meta.z = g.z(k);
                 meta.t = t;
-                meta.product = "slice_xy";
-                meta.quantity = "mass_concentration";
 
                 const QString f = QDir(framesDir()).filePath(
                     QString("frame_%1_%2.csv").arg(frameId_, 4, 10, QLatin1Char('0')).arg(suffix));
@@ -1091,45 +1006,9 @@ void MainWindow::onTick()
                 }
             };
 
-            auto writeColumn = [&]() {
-                std::vector<float> grid2d;
-                float mx = 0.0f;
-                engine_.extractColumnIntegralXY(grid2d, mx);
-
-                ExporterCsv::Meta meta;
-                meta.epsg = 0;
-                meta.origin_x = g.x0;
-                meta.origin_y = g.y0;
-                meta.dx = g.dx;
-                meta.dy = g.dy;
-                meta.z = -1.0;
-                meta.t = t;
-                meta.product = "column_integral";
-                meta.quantity = "mass_per_area";
-
-                const QString f = QDir(framesDir()).filePath(
-                    QString("frame_%1_column.csv").arg(frameId_, 4, 10, QLatin1Char('0')));
-
-                std::string err;
-                if (!ExporterCsv::writeGridFrame(
-                        f.toStdString(),
-                        meta,
-                        g.Nx,
-                        g.Ny,
-                        grid2d,
-                        err)) {
-                    appendLog("[CSV] column write failed: " + QString::fromStdString(err));
-                } else {
-                    appendLog("[CSV] wrote: " + f);
-                }
-            };
-
             writeSlice("zslice", effectiveZSlice());
             if (cbExportTwoSlices_->isChecked()) {
                 writeSlice("agl", aglSliceZ());
-            }
-            if (cbExportColumn_->isChecked()) {
-                writeColumn();
             }
 
             frameId_++;

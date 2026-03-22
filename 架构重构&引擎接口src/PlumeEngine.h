@@ -1,5 +1,4 @@
 #pragma once
-#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -30,18 +29,6 @@ public:
     double currentLeakRate() const;
 
     void extractSliceXY(int k, std::vector<float>& out, float& maxC) const;
-    void extractColumnIntegralXY(std::vector<float>& out, float& maxC) const;
-
-    double lastSolveMs() const { return lastSolveMs_; }
-    double totalSolveMs() const { return totalSolveMs_; }
-    std::uint64_t solveStepCount() const { return solveStepCount_; }
-    double averageSolveMs() const
-    {
-        return solveStepCount_ > 0 ? totalSolveMs_ / static_cast<double>(solveStepCount_) : 0.0;
-    }
-
-private:
-    void resetSolveStats();
 
 private:
     Grid3D grid_;
@@ -50,8 +37,4 @@ private:
 
     std::unique_ptr<ISimulationModel> model_;
     SimulationModelType modelType_ = SimulationModelType::CfdEulerian;
-
-    double lastSolveMs_ = 0.0;
-    double totalSolveMs_ = 0.0;
-    std::uint64_t solveStepCount_ = 0;
 };

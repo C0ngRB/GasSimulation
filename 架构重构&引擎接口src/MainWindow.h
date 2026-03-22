@@ -10,7 +10,6 @@
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QScrollArea>
 #include <QTimer>
-#include <QString>
 
 #include <vector>
 
@@ -77,7 +76,7 @@ private:
     QDoubleSpinBox* sbZSlice_{nullptr};
     QCheckBox* cbFollowSlice_{nullptr};
 
-    QComboBox* cbModel_{nullptr};
+    QComboBox* cbModel_{nullptr};            // 新增：计算模型选择控件
     QDoubleSpinBox* sbWindSpeed_{nullptr};
     QDoubleSpinBox* sbWindDir_{nullptr};
     QDoubleSpinBox* sbK_{nullptr};
@@ -89,7 +88,6 @@ private:
     QCheckBox* cbExportCsv_{nullptr};
     QDoubleSpinBox* sbExportInterval_{nullptr};
     QCheckBox* cbExportTwoSlices_{nullptr};
-    QCheckBox* cbExportColumn_{nullptr};
 
     QDoubleSpinBox* sbSrcX_{nullptr};
     QDoubleSpinBox* sbSrcY_{nullptr};
@@ -120,7 +118,7 @@ private:
     float tMin_{0.0f}, tMax_{0.0f};
     std::vector<float> terrainXY_;
 
-    PlumeEngine engine_;
+    PlumeEngine engine_;                     // 改为统一引擎
     bool simReady_{false};
     QTimer* timer_{nullptr};
     bool running_{false};
@@ -131,18 +129,8 @@ private:
     std::vector<float> slice_;
     float sliceMax_{0.0f};
 
-    QString currentExperimentId_;
-    QString currentExperimentStartMinute_;
-    QString currentExperimentLogPath_;
-    bool currentExperimentActive_{false};
-
     void appendLog(const QString& s);
-    void appendExperimentLogLine(const QString& s);
     QString framesDir() const;
-    QString logsDir() const;
-    QString createExperimentId() const;
-    void startExperimentLogSession();
-    void closeExperimentLogSession();
 
     TerrainMode terrainMode() const;
     const ITerrain* currentTerrain() const;

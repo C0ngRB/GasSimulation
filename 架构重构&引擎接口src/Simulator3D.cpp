@@ -124,8 +124,3 @@ void Simulator3D::extractSliceXY(int zIndex, std::vector<float>& outSlice, float
 {
     solver_.extractSliceXY(zIndex, outSlice, outMax);
 }
-
-void Simulator3D::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
-{
-    solver_.extractColumnIntegralXY(outGrid, outMax);
-}

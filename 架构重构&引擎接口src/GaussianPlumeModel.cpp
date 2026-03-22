@@ -198,38 +198,3 @@ void GaussianPlumeModel::extractSliceXY(int zIndex, std::vector<float>& outSlice
 
     maxC_ = outMax;
 }
-
-void GaussianPlumeModel::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
-{
-    outGrid.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
-    outMax = 0.0f;
-
-    std::vector<float> tmp;
-    float tmpMax = 0.0f;
-    const float dz = static_cast<float>(grid_.dz);
-
-    for (int k = 0; k < grid_.Nz; ++k) {
-        const double z = grid_.z(k);
-        extractSliceXY(k, tmp, tmpMax);
-
-        for (int j = 0; j < grid_.Ny; ++j) {
-            const double y = grid_.y(j);
-            for (int i = 0; i < grid_.Nx; ++i) {
-                const double x = grid_.x(i);
-                const double ground = terrainSampler_.heightBilinear(x, y);
-                if (z <= ground) {
-                    continue;
-                }
-
-                const std::size_t id = static_cast<std::size_t>(i) +
-                                       static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx);
-                outGrid[id] += tmp[id] * dz;
-            }
-        }
-    }
-
-    for (float v : outGrid) {
-        outMax = std::max(outMax, v);
-    }
-    maxC_ = outMax;
-}

@@ -14,9 +14,6 @@ public:
         double dy = 1;
         double z = 0;
         double t = 0;
-
-        std::string product;
-        std::string quantity;
     };
 
     static bool writeGridFrame(const std::string &path,

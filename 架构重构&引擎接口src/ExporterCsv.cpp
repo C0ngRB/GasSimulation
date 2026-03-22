@@ -31,12 +31,6 @@ bool ExporterCsv::writeGridFrame(const std::string &path,
     f << "# Nx: " << Nx << "\n";
     f << "# Ny: " << Ny << "\n";
     f << "# t: " << meta.t << "\n";
-    if (!meta.product.empty()) {
-        f << "# product: " << meta.product << "\n";
-    }
-    if (!meta.quantity.empty()) {
-        f << "# quantity: " << meta.quantity << "\n";
-    }
 
     f << std::setprecision(6) << std::scientific;
     for (int j = 0; j < Ny; ++j)

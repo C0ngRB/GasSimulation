@@ -44,12 +44,6 @@ public:
         outMax = 0.0f;
     }
 
-    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override
-    {
-        outGrid.clear();
-        outMax = 0.0f;
-    }
-
 private:
     Grid3D grid_{};
     SimulationConfig config_{};

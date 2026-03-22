@@ -1,19 +1,18 @@
 #pragma once
-#include <vector>
-
 #include "ISimulationModel.h"
+#include "EulerianSolver3D.h"
 #include "LeakSourceController.h"
 #include "TerrainSampler.h"
 #include "WindField.h"
 
-class GaussianPuffModel final : public ISimulationModel
+class Simulator3D final : public ISimulationModel
 {
 public:
-    GaussianPuffModel() = default;
+    Simulator3D() = default;
 
     SimulationModelType modelType() const override
     {
-        return SimulationModelType::GaussianPuff;
+        return SimulationModelType::CfdEulerian;
     }
 
     bool initialize(
@@ -37,26 +36,6 @@ public:
     double currentLeakRate() const override { return sourceController_.currentLeakRate(); }
 
     void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override;
-    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override;
-
-private:
-    struct Puff
-    {
-        double x = 0.0;
-        double y = 0.0;
-        double z = 0.0;
-        double age = 0.0;
-        double mass = 0.0;
-        double sigma0 = 1.0;
-    };
-
-    double releaseInterval() const;
-    void emitUntil(double tNow);
-    void advectAll(double dt);
-
-    double sigmaAt(const Puff& pf) const;
-    double terrainTransmittance(const Puff& pf, double x, double y, double zWorld, double sigma) const;
-    double contribution(const Puff& pf, double x, double y, double zWorld) const;
 
 private:
     Grid3D grid_{};
@@ -64,13 +43,10 @@ private:
     SimulationConfig config_{};
 
     double t_{0.0};
-    double lastReleaseT_{0.0};
-    mutable float maxC_{0.0f};
+    float maxC_{0.0f};
 
     TerrainSampler terrainSampler_{};
     TerrainAwareWindField windField_{};
     LeakSourceController sourceController_{};
-
-    std::vector<Puff> puffs_;
-    std::size_t maxPuffs_{4000};
+    EulerianSolver3D solver_{};
 };

@@ -1,20 +1,11 @@
 #include "PlumeEngine.h"
 
-#include <chrono>
-
 #include "GaussianPlumeModel.h"
 #include "GaussianPuffModel.h"
 #include "Simulator3D.h"
 
 PlumeEngine::PlumeEngine() = default;
 PlumeEngine::~PlumeEngine() = default;
-
-void PlumeEngine::resetSolveStats()
-{
-    lastSolveMs_ = 0.0;
-    totalSolveMs_ = 0.0;
-    solveStepCount_ = 0;
-}
 
 void PlumeEngine::setModel(SimulationModelType t)
 {
@@ -31,7 +22,6 @@ bool PlumeEngine::initialize(const Grid3D& g, const ITerrain* terr, const Simula
     grid_ = g;
     terr_ = terr;
     config_ = p;
-    resetSolveStats();
 
     switch (modelType_) {
     case SimulationModelType::CfdEulerian:
@@ -54,22 +44,12 @@ bool PlumeEngine::initialize(const Grid3D& g, const ITerrain* terr, const Simula
 void PlumeEngine::reset()
 {
     if (model_) model_->reset();
-    resetSolveStats();
 }
 
 double PlumeEngine::step()
 {
     if (!model_) return 0.0;
-
-    const auto t0 = std::chrono::steady_clock::now();
-    const double out = model_->step();
-    const auto t1 = std::chrono::steady_clock::now();
-
-    lastSolveMs_ = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    totalSolveMs_ += lastSolveMs_;
-    ++solveStepCount_;
-
-    return out;
+    return model_->step();
 }
 
 double PlumeEngine::time() const
@@ -106,16 +86,6 @@ void PlumeEngine::extractSliceXY(int k, std::vector<float>& out, float& maxC) co
 {
     if (model_) {
         model_->extractSliceXY(k, out, maxC);
-    } else {
-        out.clear();
-        maxC = 0.0f;
-    }
-}
-
-void PlumeEngine::extractColumnIntegralXY(std::vector<float>& out, float& maxC) const
-{
-    if (model_) {
-        model_->extractColumnIntegralXY(out, maxC);
     } else {
         out.clear();
         maxC = 0.0f;

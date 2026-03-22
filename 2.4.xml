@@ -1,0 +1,4298 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+ColorMap.h
+CsvFrameReader.cpp
+CsvFrameReader.h
+EulerianSolver3D.cpp
+EulerianSolver3D.h
+ExporterCsv.cpp
+ExporterCsv.h
+ExternalCfdBackend.h
+GaussianPlumeModel.cpp
+GaussianPlumeModel.h
+GaussianPuffModel.cpp
+GaussianPuffModel.h
+Grid3D.h
+ISimulationModel.h
+ITerrain.h
+LeakSourceController.h
+main.cpp
+MainWindow.cpp
+MainWindow.h
+PlumeEngine.cpp
+PlumeEngine.h
+SimulationConfig.h
+Simulator3D.cpp
+Simulator3D.h
+TerrainDem.cpp
+TerrainDem.h
+TerrainFlat.h
+TerrainProcedural.h
+TerrainSampler.h
+tif/紫金山_演示数据.tif
+WindField.cpp
+WindField.h
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="ColorMap.h">
+#pragma once
+#include <QtGui/QColor>
+#include <algorithm>
+
+/**
+ * @file ColorMap.h
+ * @brief 科学可视化颜色映射（热力图）
+ *
+ * 【设计目的】
+ * 将归一化的气体浓度值映射为可见颜色，用于在Qt界面中可视化浓度分布。
+ * 采用经典的热力图色谱（蓝→青→黄→红），直观表示低浓度到高浓度的过渡。
+ *
+ * 【颜色方案】
+ * 采用四阶段分段线性插值（LERP），每个阶段的颜色选择基于：
+ * - 低浓度（蓝色）：冷色调，表示安全/低风险区域
+ * - 中低浓度（青色）：冷暖过渡起始
+ * - 中高浓度（黄色）：警告色，表示需要注意
+ * - 高浓度（红色）：暖色调，表示高浓度/危险区域
+ *
+ * 【色谱映射表】
+ * | 归一化值 | 颜色名称 | RGB值     | 含义           |
+ * |----------|----------|-----------|----------------|
+ * | 0.00     | 深蓝     | (0, 0, 140) | 最低检测浓度   |
+ * | 0.33     | 青色     | (0, 255, 255) | 中低浓度       |
+ * | 0.66     | 黄色     | (255, 255, 0) | 中高浓度       |
+ * | 1.00     | 红色     | (255, 0, 0)  | 最高浓度       |
+ *
+ * 【物理意义】
+ * 在气体扩散模拟中，颜色直观反映浓度风险等级：
+ * - 蓝色/青色区域：浓度低于检测阈值或安全水平
+ * - 黄色区域：浓度达到需要注意的水平
+ * - 红色区域：高浓度区域，可能需要预警
+ *
+ * 【使用场景】
+ * MainWindow::renderTerrainAndSlice() 中使用此函数：
+ * 1. 提取指定高度层的二维浓度切片
+ * 2. 找到切片中的最大浓度值（用于归一化）
+ * 3. 对每个网格点调用 colorMap(c/max) 获取颜色
+ * 4. 将颜色绘制到QImage进行显示
+ *
+ * 【算法说明】
+ * 使用分段线性插值而非纯RGB三线性插值，保证：
+ * - 颜色过渡平滑自然
+ * - 计算量小，适合实时渲染
+ * - 颜色变化单调递增，符合直觉
+ *
+ * 【与Qt的集成】
+ * 返回 QColor 对象，可直接用于 QImage::setPixelColor() 或 QPainter::setPen()。
+ *
+ * @param x 归一化浓度值，范围 [0, 1]
+ *        - 0.0 表示浓度为0或低于检测下限
+ *        - 1.0 表示当前切片中的最大浓度
+ * @return QColor 对应的RGB颜色
+ */
+inline QColor colorMap(float x)
+{
+  // 钳制输入到有效范围，避免异常颜色
+  x = std::clamp(x, 0.0f, 1.0f);
+
+  // 线性插值辅助函数：在[a, b]区间内按比例t插值
+  // t=0返回a，t=1返回b
+  auto lerp = [](float a, float b, float t)
+  { return a + (b - a) * t; };
+
+  float r = 0, g = 0, b = 0;
+
+  if (x < 0.33f)
+  {
+    // 第一阶段：深蓝(0,0,140) → 青色(0,255,255)
+    // 适用于低浓度区域，冷色调表示安全
+    float t = x / 0.33f;
+    r = 0;
+    g = lerp(0, 255, t);
+    b = lerp(140, 255, t);
+  }
+  else if (x < 0.66f)
+  {
+    // 第二阶段：青色(0,255,255) → 黄色(255,255,0)
+    // 从冷色向暖色过渡，视觉上提醒浓度增加
+    float t = (x - 0.33f) / 0.33f;
+    r = lerp(0, 255, t);
+    g = 255;
+    b = lerp(255, 0, t);
+  }
+  else
+  {
+    // 第三阶段：黄色(255,255,0) → 红色(255,0,0)
+    // 高浓度区域，红色警示
+    float t = (x - 0.66f) / 0.34f;
+    r = 255;
+    g = lerp(255, 0, t);
+    b = 0;
+  }
+
+  return QColor((int)r, (int)g, (int)b);
+}
+</file>
+
+<file path="CsvFrameReader.cpp">
+#include "CsvFrameReader.h"
+
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+std::string trim(const std::string& s)
+{
+    std::size_t b = 0;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) {
+        ++b;
+    }
+
+    std::size_t e = s.size();
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) {
+        --e;
+    }
+
+    return s.substr(b, e - b);
+}
+
+bool parseHeaderLine(const std::string& line, std::string& key, std::string& value)
+{
+    if (line.empty() || line[0] != '#') {
+        return false;
+    }
+
+    const std::string body = trim(line.substr(1));
+
+    std::size_t pos = body.find(':');
+    if (pos == std::string::npos) {
+        pos = body.find('=');
+    }
+    if (pos == std::string::npos) {
+        return false;
+    }
+
+    key = trim(body.substr(0, pos));
+    value = trim(body.substr(pos + 1));
+    return !key.empty();
+}
+
+bool parseIntMeta(const std::map<std::string, std::string>& meta, const std::string& key, int& out)
+{
+    auto it = meta.find(key);
+    if (it == meta.end()) return false;
+
+    try {
+        out = std::stoi(it->second);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::vector<float> parseCsvRow(const std::string& line, bool& ok)
+{
+    ok = true;
+    std::vector<float> row;
+
+    std::stringstream ss(line);
+    std::string cell;
+
+    while (std::getline(ss, cell, ',')) {
+        const std::string v = trim(cell);
+        try {
+            row.push_back(v.empty() ? 0.0f : std::stof(v));
+        } catch (...) {
+            ok = false;
+            return {};
+        }
+    }
+
+    if (line.find(',') != std::string::npos && !line.empty() && line.back() == ',') {
+        row.push_back(0.0f);
+    }
+
+    return row;
+}
+
+} // namespace
+
+bool CsvFrameReader::read(const std::string& path, Frame& out, std::string& err)
+{
+    err.clear();
+    out = Frame{};
+
+    std::ifstream fin(path);
+    if (!fin) {
+        err = "Cannot open file: " + path;
+        return false;
+    }
+
+    std::string line;
+    std::vector<std::vector<float>> rows;
+
+    while (std::getline(fin, line)) {
+        const std::string s = trim(line);
+        if (s.empty()) {
+            continue;
+        }
+
+        std::string key;
+        std::string value;
+        if (parseHeaderLine(s, key, value)) {
+            out.meta[key] = value;
+            continue;
+        }
+
+        bool ok = false;
+        std::vector<float> row = parseCsvRow(s, ok);
+        if (!ok) {
+            err = "Failed to parse numeric row in: " + path;
+            return false;
+        }
+        if (row.empty()) {
+            continue;
+        }
+        rows.push_back(std::move(row));
+    }
+
+    if (rows.empty()) {
+        err = "No grid rows in CSV: " + path;
+        return false;
+    }
+
+    int nxHeader = 0;
+    int nyHeader = 0;
+    parseIntMeta(out.meta, "Nx", nxHeader);
+    parseIntMeta(out.meta, "Ny", nyHeader);
+
+    const int nxData = static_cast<int>(rows.front().size());
+    const int nyData = static_cast<int>(rows.size());
+
+    for (const auto& row : rows) {
+        if (static_cast<int>(row.size()) != nxData) {
+            err = "Inconsistent row width in CSV: " + path;
+            return false;
+        }
+    }
+
+    if (nxHeader > 0 && nxHeader != nxData) {
+        err = "Header Nx does not match data width in: " + path;
+        return false;
+    }
+    if (nyHeader > 0 && nyHeader != nyData) {
+        err = "Header Ny does not match data height in: " + path;
+        return false;
+    }
+
+    out.Nx = (nxHeader > 0) ? nxHeader : nxData;
+    out.Ny = (nyHeader > 0) ? nyHeader : nyData;
+    out.grid = std::move(rows);
+
+    return true;
+}
+</file>
+
+<file path="CsvFrameReader.h">
+#pragma once
+#include <map>
+#include <string>
+#include <vector>
+
+#include <QMetaType>
+
+class CsvFrameReader
+{
+public:
+    struct Frame
+    {
+        std::map<std::string, std::string> meta;
+        int Nx = 0;
+        int Ny = 0;
+        std::vector<std::vector<float>> grid;
+    };
+
+    static bool read(const std::string& path, Frame& out, std::string& err);
+};
+
+Q_DECLARE_METATYPE(CsvFrameReader::Frame)
+</file>
+
+<file path="EulerianSolver3D.cpp">
+#include "EulerianSolver3D.h"
+
+#include <cmath>
+#include <limits>
+
+bool EulerianSolver3D::initialize(const Grid3D& grid, const TerrainSampler* terrain, const Params& p, std::string& err)
+{
+    err.clear();
+    grid_ = grid;
+    terrain_ = terrain;
+    params_ = p;
+
+    if (!terrain_) {
+        err = "EulerianSolver3D: terrain sampler is null.";
+        return false;
+    }
+
+    try {
+        grid_.validate();
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+
+    const std::size_t n = static_cast<std::size_t>(grid_.Nx)
+                        * static_cast<std::size_t>(grid_.Ny)
+                        * static_cast<std::size_t>(grid_.Nz);
+
+    C_.assign(n, 0.0f);
+    Cnew_.assign(n, 0.0f);
+    solid_.assign(n, 0);
+    sourceMask_.assign(n, 0);
+
+    buildSolidMask();
+    buildSourceMask();
+    maxC_ = 0.0f;
+    return true;
+}
+
+void EulerianSolver3D::reset()
+{
+    std::fill(C_.begin(), C_.end(), 0.0f);
+    std::fill(Cnew_.begin(), Cnew_.end(), 0.0f);
+    maxC_ = 0.0f;
+}
+
+void EulerianSolver3D::buildSolidMask()
+{
+    for (int j = 0; j < grid_.Ny; ++j) {
+        const double y = grid_.y(j);
+        for (int i = 0; i < grid_.Nx; ++i) {
+            const double x = grid_.x(i);
+            const double h = terrain_->heightBilinear(x, y);
+            for (int k = 0; k < grid_.Nz; ++k) {
+                const double z = grid_.z(k);
+                solid_[grid_.idx(i, j, k)] = (z <= h) ? 1 : 0;
+            }
+        }
+    }
+}
+
+void EulerianSolver3D::buildSourceMask()
+{
+    sourceCellCount_ = 0;
+    const double r = std::max(0.0, params_.srcRadius_m);
+    const double r2 = r * r;
+
+    for (int k = 0; k < grid_.Nz; ++k) {
+        const double z = grid_.z(k);
+        for (int j = 0; j < grid_.Ny; ++j) {
+            const double y = grid_.y(j);
+            for (int i = 0; i < grid_.Nx; ++i) {
+                const double x = grid_.x(i);
+                const double d2 =
+                    (x - params_.srcX_m) * (x - params_.srcX_m) +
+                    (y - params_.srcY_m) * (y - params_.srcY_m) +
+                    (z - params_.srcZ_m) * (z - params_.srcZ_m);
+
+                const bool inside = (d2 <= r2) && !isSolid(i, j, k);
+                sourceMask_[grid_.idx(i, j, k)] = inside ? 1 : 0;
+                if (inside) {
+                    ++sourceCellCount_;
+                }
+            }
+        }
+    }
+
+    if (sourceCellCount_ == 0) {
+        double bestD2 = std::numeric_limits<double>::infinity();
+        std::size_t bestId = 0;
+        bool found = false;
+
+        for (int k = 0; k < grid_.Nz; ++k) {
+            const double z = grid_.z(k);
+            for (int j = 0; j < grid_.Ny; ++j) {
+                const double y = grid_.y(j);
+                for (int i = 0; i < grid_.Nx; ++i) {
+                    if (isSolid(i, j, k)) continue;
+                    const double x = grid_.x(i);
+                    const double d2 =
+                        (x - params_.srcX_m) * (x - params_.srcX_m) +
+                        (y - params_.srcY_m) * (y - params_.srcY_m) +
+                        (z - params_.srcZ_m) * (z - params_.srcZ_m);
+                    if (d2 < bestD2) {
+                        bestD2 = d2;
+                        bestId = grid_.idx(i, j, k);
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        if (found) {
+            sourceMask_[bestId] = 1;
+            sourceCellCount_ = 1;
+        }
+    }
+}
+
+float EulerianSolver3D::fluidNeighborOrSelf(int ni, int nj, int nk, float self) const
+{
+    if (ni < 0 || ni >= grid_.Nx || nj < 0 || nj >= grid_.Ny || nk < 0 || nk >= grid_.Nz) {
+        return self;
+    }
+    if (isSolid(ni, nj, nk)) {
+        return self;
+    }
+    return cell(ni, nj, nk);
+}
+
+double EulerianSolver3D::stableDt(double representativeSpeed) const
+{
+    const double eps = 1.0e-12;
+    const double cfl = 0.35;
+    const double diff = 0.15;
+
+    double dtAdv = 1.0e9;
+    if (representativeSpeed > eps) {
+        const double h = std::min({grid_.dx, grid_.dy, grid_.dz});
+        dtAdv = cfl * h / representativeSpeed;
+    }
+
+    double dtDiff = 1.0e9;
+    if (params_.K_m2ps > eps) {
+        const double h2 = std::min({
+            grid_.dx * grid_.dx,
+            grid_.dy * grid_.dy,
+            grid_.dz * grid_.dz
+        });
+        dtDiff = diff * h2 / (6.0 * params_.K_m2ps);
+    }
+
+    return std::min(dtAdv, dtDiff);
+}
+
+void EulerianSolver3D::step(double dt, const IWindField& windField, double leakRate_kgps)
+{
+    dt = std::max(1.0e-9, dt);
+
+    const double K = std::max(0.0, params_.K_m2ps);
+    const double decay = std::max(0.0, params_.decay_1ps);
+
+    const float sourceAdd = (sourceCellCount_ > 0)
+        ? static_cast<float>((std::max(0.0, leakRate_kgps) * dt) / (grid_.cellVolume() * static_cast<double>(sourceCellCount_)))
+        : 0.0f;
+
+    maxC_ = 0.0f;
+
+    for (int k = 0; k < grid_.Nz; ++k) {
+        const double z = grid_.z(k);
+        for (int j = 0; j < grid_.Ny; ++j) {
+            const double y = grid_.y(j);
+            for (int i = 0; i < grid_.Nx; ++i) {
+                const std::size_t id = grid_.idx(i, j, k);
+                if (solid_[id]) {
+                    Cnew_[id] = 0.0f;
+                    continue;
+                }
+
+                const float Cc = C_[id];
+                const WindSample ws = windField.sample(grid_.x(i), y, z);
+
+                const float Cxm = fluidNeighborOrSelf(i - 1, j, k, Cc);
+                const float Cxp = fluidNeighborOrSelf(i + 1, j, k, Cc);
+                const float Cym = fluidNeighborOrSelf(i, j - 1, k, Cc);
+                const float Cyp = fluidNeighborOrSelf(i, j + 1, k, Cc);
+                const float Czm = fluidNeighborOrSelf(i, j, k - 1, Cc);
+                const float Czp = fluidNeighborOrSelf(i, j, k + 1, Cc);
+
+                float dCdx = 0.0f;
+                if (ws.u >= 0.0) dCdx = (Cc - Cxm) / static_cast<float>(grid_.dx);
+                else             dCdx = (Cxp - Cc) / static_cast<float>(grid_.dx);
+
+                float dCdy = 0.0f;
+                if (ws.v >= 0.0) dCdy = (Cc - Cym) / static_cast<float>(grid_.dy);
+                else             dCdy = (Cyp - Cc) / static_cast<float>(grid_.dy);
+
+                float dCdz = 0.0f;
+                if (ws.w >= 0.0) dCdz = (Cc - Czm) / static_cast<float>(grid_.dz);
+                else             dCdz = (Czp - Cc) / static_cast<float>(grid_.dz);
+
+                const float d2Cdx2 = (Cxp - 2.0f * Cc + Cxm) / static_cast<float>(grid_.dx * grid_.dx);
+                const float d2Cdy2 = (Cyp - 2.0f * Cc + Cym) / static_cast<float>(grid_.dy * grid_.dy);
+                const float d2Cdz2 = (Czp - 2.0f * Cc + Czm) / static_cast<float>(grid_.dz * grid_.dz);
+
+                const float adv = static_cast<float>(-(ws.u * dCdx + ws.v * dCdy + ws.w * dCdz));
+                const float dif = static_cast<float>(K * (d2Cdx2 + d2Cdy2 + d2Cdz2));
+                const float dec = static_cast<float>(-decay * Cc);
+
+                float Cn = Cc + static_cast<float>(dt) * (adv + dif + dec);
+                if (isSourceCell(i, j, k)) {
+                    Cn += sourceAdd;
+                }
+                if (Cn < 0.0f) {
+                    Cn = 0.0f;
+                }
+
+                Cnew_[id] = Cn;
+                maxC_ = std::max(maxC_, Cn);
+            }
+        }
+    }
+
+    C_.swap(Cnew_);
+}
+
+void EulerianSolver3D::extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const
+{
+    zIndex = std::clamp(zIndex, 0, grid_.Nz - 1);
+    outSlice.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    for (int j = 0; j < grid_.Ny; ++j) {
+        for (int i = 0; i < grid_.Nx; ++i) {
+            const float v = C_[grid_.idx(i, j, zIndex)];
+            outSlice[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx)] = v;
+            outMax = std::max(outMax, v);
+        }
+    }
+}
+
+void EulerianSolver3D::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
+{
+    outGrid.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    const float dz = static_cast<float>(grid_.dz);
+
+    for (int j = 0; j < grid_.Ny; ++j) {
+        for (int i = 0; i < grid_.Nx; ++i) {
+            float acc = 0.0f;
+            for (int k = 0; k < grid_.Nz; ++k) {
+                const std::size_t id3 = grid_.idx(i, j, k);
+                if (!solid_[id3]) {
+                    acc += C_[id3] * dz;
+                }
+            }
+            const std::size_t id2 = static_cast<std::size_t>(i) +
+                                    static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx);
+            outGrid[id2] = acc;
+            outMax = std::max(outMax, acc);
+        }
+    }
+}
+</file>
+
+<file path="EulerianSolver3D.h">
+#pragma once
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "Grid3D.h"
+#include "TerrainSampler.h"
+#include "WindField.h"
+
+class EulerianSolver3D
+{
+public:
+    struct Params
+    {
+        double K_m2ps = 1.0;
+        double decay_1ps = 0.0;
+        double srcX_m = 0.0;
+        double srcY_m = 0.0;
+        double srcZ_m = 0.0;
+        double srcRadius_m = 2.0;
+    };
+
+    bool initialize(const Grid3D& grid, const TerrainSampler* terrain, const Params& p, std::string& err);
+    void reset();
+    double stableDt(double representativeSpeed) const;
+    void step(double dt, const IWindField& windField, double leakRate_kgps);
+
+    void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const;
+    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const;
+
+    const Grid3D& grid() const { return grid_; }
+    float maxC() const { return maxC_; }
+
+private:
+    bool isSolid(int i, int j, int k) const
+    {
+        return solid_[grid_.idx(i, j, k)] != 0;
+    }
+
+    bool isSourceCell(int i, int j, int k) const
+    {
+        return sourceMask_[grid_.idx(i, j, k)] != 0;
+    }
+
+    float cell(int i, int j, int k) const
+    {
+        return C_[grid_.idx(i, j, k)];
+    }
+
+    float fluidNeighborOrSelf(int ni, int nj, int nk, float self) const;
+    void buildSolidMask();
+    void buildSourceMask();
+
+private:
+    Grid3D grid_{};
+    const TerrainSampler* terrain_{nullptr};
+    Params params_{};
+
+    std::vector<float> C_;
+    std::vector<float> Cnew_;
+    std::vector<std::uint8_t> solid_;
+    std::vector<std::uint8_t> sourceMask_;
+
+    int sourceCellCount_{0};
+    float maxC_{0.0f};
+};
+</file>
+
+<file path="ExporterCsv.cpp">
+#include "ExporterCsv.h"
+
+#include <fstream>
+#include <iomanip>
+
+bool ExporterCsv::writeGridFrame(const std::string &path,
+                                 const Meta &meta,
+                                 int Nx, int Ny,
+                                 const std::vector<float> &data,
+                                 std::string &err)
+{
+    if ((int)data.size() != Nx * Ny)
+    {
+        err = "data size mismatch";
+        return false;
+    }
+
+    std::ofstream f(path);
+    if (!f)
+    {
+        err = "open failed";
+        return false;
+    }
+
+    f << "# epsg: " << meta.epsg << "\n";
+    f << "# origin_x: " << meta.origin_x << "\n";
+    f << "# origin_y: " << meta.origin_y << "\n";
+    f << "# dx: " << meta.dx << "\n";
+    f << "# dy: " << meta.dy << "\n";
+    f << "# z: " << meta.z << "\n";
+    f << "# Nx: " << Nx << "\n";
+    f << "# Ny: " << Ny << "\n";
+    f << "# t: " << meta.t << "\n";
+    if (!meta.product.empty()) {
+        f << "# product: " << meta.product << "\n";
+    }
+    if (!meta.quantity.empty()) {
+        f << "# quantity: " << meta.quantity << "\n";
+    }
+
+    f << std::setprecision(6) << std::scientific;
+    for (int j = 0; j < Ny; ++j)
+    {
+        for (int i = 0; i < Nx; ++i)
+        {
+            const float v = data[j * Nx + i];
+            f << v;
+            if (i + 1 < Nx)
+                f << ",";
+        }
+        f << "\n";
+    }
+    return true;
+}
+</file>
+
+<file path="ExporterCsv.h">
+#pragma once
+#include <string>
+#include <vector>
+
+class ExporterCsv
+{
+public:
+    struct Meta
+    {
+        int epsg = 0;
+        double origin_x = 0;
+        double origin_y = 0;
+        double dx = 1;
+        double dy = 1;
+        double z = 0;
+        double t = 0;
+
+        std::string product;
+        std::string quantity;
+    };
+
+    static bool writeGridFrame(const std::string &path,
+                               const Meta &meta,
+                               int Nx, int Ny,
+                               const std::vector<float> &data,
+                               std::string &err);
+};
+</file>
+
+<file path="ExternalCfdBackend.h">
+#pragma once
+#include <string>
+
+#include "ISimulationModel.h"
+
+class ExternalCfdBackend final : public ISimulationModel
+{
+public:
+    ExternalCfdBackend() = default;
+    ~ExternalCfdBackend() override = default;
+
+    SimulationModelType modelType() const override
+    {
+        return SimulationModelType::CfdEulerian;
+    }
+
+    bool initialize(
+        const Grid3D& grid,
+        const ITerrain* terrain,
+        const SimulationConfig& config,
+        std::string& err) override
+    {
+        err = "ExternalCfdBackend: not implemented in this build.";
+        return false;
+    }
+
+    void reset() override {}
+    double step() override { return 0.0; }
+    double stableDt() const override { return 1.0; }
+
+    double time() const override { return 0.0; }
+    float maxC() const override { return 0.0f; }
+
+    const Grid3D& grid() const override { return grid_; }
+    const SimulationConfig& config() const override { return config_; }
+
+    double currentWindSpeed() const override { return 0.0; }
+    double currentWindDirDeg() const override { return 0.0; }
+    double currentLeakRate() const override { return 0.0; }
+
+    void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override
+    {
+        outSlice.clear();
+        outMax = 0.0f;
+    }
+
+    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override
+    {
+        outGrid.clear();
+        outMax = 0.0f;
+    }
+
+private:
+    Grid3D grid_{};
+    SimulationConfig config_{};
+};
+</file>
+
+<file path="GaussianPlumeModel.cpp">
+#include "GaussianPlumeModel.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr double kPi = 3.1415926535897932384626433832795;
+}
+
+bool GaussianPlumeModel::initialize(
+    const Grid3D& grid,
+    const ITerrain* terrain,
+    const SimulationConfig& config,
+    std::string& err)
+{
+    err.clear();
+    grid_ = grid;
+    terrainRaw_ = terrain;
+    config_ = config;
+    config_.model = SimulationModelType::GaussianPlume;
+    t_ = 0.0;
+    maxC_ = 0.0f;
+
+    try {
+        grid_.validate();
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+
+    if (!terrainRaw_) {
+        err = "GaussianPlumeModel: terrain is null.";
+        return false;
+    }
+    if (!terrainRaw_->isValid()) {
+        err = "GaussianPlumeModel: terrain invalid.";
+        return false;
+    }
+
+    if (!terrainSampler_.initialize(grid_, terrainRaw_, err)) {
+        return false;
+    }
+
+    const double groundAtSource = terrainSampler_.heightBilinear(config_.srcX_m, config_.srcY_m);
+    if (config_.srcZ_m <= groundAtSource + 1.0e-6) {
+        err = "GaussianPlumeModel: source Z is below or at terrain.";
+        return false;
+    }
+
+    TerrainAwareWindField::Params windParams;
+    windParams.baseSpeed_mps = config_.windSpeed_mps;
+    windParams.baseDir_deg = config_.windDir_deg;
+    windParams.noise.enabled = config_.noise.enabled;
+    windParams.noise.seed = config_.noise.seed;
+    windParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    windParams.noise.windSpeedSigma_mps = config_.noise.windSpeedSigma_mps;
+    windParams.noise.windDirSigma_deg = config_.noise.windDirSigma_deg;
+    windField_.setParams(windParams);
+
+    if (!windField_.initialize(grid_, &terrainSampler_, err)) {
+        return false;
+    }
+
+    LeakSourceController::Params leakParams;
+    leakParams.baseLeakRate = config_.leakRate_kgps;
+    leakParams.noise.enabled = config_.noise.enabled;
+    leakParams.noise.seed = config_.noise.seed + 7919U;
+    leakParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    leakParams.noise.leakRelSigma = config_.noise.leakRelSigma;
+    sourceController_.setParams(leakParams);
+    sourceController_.initialize();
+
+    return true;
+}
+
+void GaussianPlumeModel::reset()
+{
+    t_ = 0.0;
+    maxC_ = 0.0f;
+    windField_.reset();
+    sourceController_.reset();
+}
+
+double GaussianPlumeModel::stableDt() const
+{
+    const double U = std::max(0.25, windField_.representativeSpeed());
+    const double h = std::min({grid_.dx, grid_.dy, grid_.dz});
+    return 0.50 * h / U;
+}
+
+double GaussianPlumeModel::step()
+{
+    if (t_ >= config_.totalTime_s - 1.0e-12) {
+        return t_;
+    }
+
+    double dt = std::max(1.0e-9, config_.dt_s);
+    if (config_.autoClampDt) {
+        dt = std::min(dt, stableDt());
+    }
+    dt = std::min(dt, config_.totalTime_s - t_);
+    dt = std::max(1.0e-9, dt);
+
+    windField_.advance(dt);
+    sourceController_.advance(dt);
+    t_ += dt;
+    return t_;
+}
+
+double GaussianPlumeModel::terrainTransmittance(double x, double y, double zWorld, double sigmaZ) const
+{
+    const double hMax = terrainSampler_.maxHeightAlongRay(
+        config_.srcX_m, config_.srcY_m, x, y, 24);
+
+    const double zLine = 0.5 * (config_.srcZ_m + zWorld);
+    const double clearance = zLine + sigmaZ - hMax;
+    const double scale = std::max(0.5, 2.0 * sigmaZ);
+
+    const double t = std::clamp(0.5 + 0.5 * clearance / scale, 0.05, 1.0);
+    return t;
+}
+
+double GaussianPlumeModel::concentrationAt(double x, double y, double zWorld) const
+{
+    const WindSample ws = windField_.sample(config_.srcX_m, config_.srcY_m, config_.srcZ_m);
+    const double U = std::max(0.25, ws.speed);
+    if (U <= 0.0) {
+        return 0.0;
+    }
+
+    const double dx = x - config_.srcX_m;
+    const double dy = y - config_.srcY_m;
+
+    const double dirX = ws.u / U;
+    const double dirY = ws.v / U;
+
+    const double s = dx * dirX + dy * dirY;
+    if (s <= 0.0) {
+        return 0.0;
+    }
+
+    const double cross = -dx * dirY + dy * dirX;
+    const double travelTime = s / U;
+    const double sigma0 = std::max(config_.srcRadius_m, 0.5 * std::min({grid_.dx, grid_.dy, grid_.dz}));
+
+    const double sigmaY = std::sqrt(
+        sigma0 * sigma0 +
+        2.0 * std::max(0.0, config_.K_m2ps) * travelTime +
+        std::pow(0.08 * s, 2.0));
+
+    const double sigmaZ = std::sqrt(
+        sigma0 * sigma0 +
+        2.0 * std::max(0.0, config_.K_m2ps) * travelTime +
+        std::pow(0.04 * s, 2.0));
+
+    const double groundR = terrainSampler_.heightBilinear(x, y);
+    const double sourceZ = std::max(config_.srcZ_m, terrainSampler_.heightBilinear(config_.srcX_m, config_.srcY_m) + 0.25 * grid_.dz);
+    const double z = std::max(zWorld, groundR + 0.01);
+
+    const double q = std::max(0.0, sourceController_.currentLeakRate());
+    if (q <= 0.0) {
+        return 0.0;
+    }
+
+    const double norm = q / (2.0 * kPi * U * sigmaY * sigmaZ);
+    const double ey = std::exp(-0.5 * (cross * cross) / (sigmaY * sigmaY));
+
+    const double ez1 = std::exp(-0.5 * std::pow((z - sourceZ) / sigmaZ, 2.0));
+    const double ez2 = std::exp(-0.5 * std::pow((z - (2.0 * groundR - sourceZ)) / sigmaZ, 2.0));
+
+    const double decay = std::exp(-std::max(0.0, config_.decay_1ps) * travelTime);
+    const double startup = 1.0 - std::exp(-t_ / std::max(1.0, 0.1 * config_.totalTime_s));
+    const double trans = terrainTransmittance(x, y, z, sigmaZ);
+
+    double c = norm * ey * (ez1 + ez2) * decay * startup * trans;
+    if (!std::isfinite(c) || c < 0.0) {
+        c = 0.0;
+    }
+    return c;
+}
+
+void GaussianPlumeModel::extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const
+{
+    zIndex = std::clamp(zIndex, 0, grid_.Nz - 1);
+    outSlice.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    const double z = grid_.z(zIndex);
+    for (int j = 0; j < grid_.Ny; ++j) {
+        const double y = grid_.y(j);
+        for (int i = 0; i < grid_.Nx; ++i) {
+            const double x = grid_.x(i);
+            const float c = static_cast<float>(concentrationAt(x, y, z));
+            outSlice[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx)] = c;
+            outMax = std::max(outMax, c);
+        }
+    }
+
+    maxC_ = outMax;
+}
+
+void GaussianPlumeModel::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
+{
+    outGrid.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    std::vector<float> tmp;
+    float tmpMax = 0.0f;
+    const float dz = static_cast<float>(grid_.dz);
+
+    for (int k = 0; k < grid_.Nz; ++k) {
+        const double z = grid_.z(k);
+        extractSliceXY(k, tmp, tmpMax);
+
+        for (int j = 0; j < grid_.Ny; ++j) {
+            const double y = grid_.y(j);
+            for (int i = 0; i < grid_.Nx; ++i) {
+                const double x = grid_.x(i);
+                const double ground = terrainSampler_.heightBilinear(x, y);
+                if (z <= ground) {
+                    continue;
+                }
+
+                const std::size_t id = static_cast<std::size_t>(i) +
+                                       static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx);
+                outGrid[id] += tmp[id] * dz;
+            }
+        }
+    }
+
+    for (float v : outGrid) {
+        outMax = std::max(outMax, v);
+    }
+    maxC_ = outMax;
+}
+</file>
+
+<file path="GaussianPlumeModel.h">
+#pragma once
+#include "ISimulationModel.h"
+#include "LeakSourceController.h"
+#include "TerrainSampler.h"
+#include "WindField.h"
+
+class GaussianPlumeModel final : public ISimulationModel
+{
+public:
+    GaussianPlumeModel() = default;
+
+    SimulationModelType modelType() const override
+    {
+        return SimulationModelType::GaussianPlume;
+    }
+
+    bool initialize(
+        const Grid3D& grid,
+        const ITerrain* terrain,
+        const SimulationConfig& config,
+        std::string& err) override;
+
+    void reset() override;
+    double step() override;
+    double stableDt() const override;
+
+    double time() const override { return t_; }
+    float maxC() const override { return maxC_; }
+
+    const Grid3D& grid() const override { return grid_; }
+    const SimulationConfig& config() const override { return config_; }
+
+    double currentWindSpeed() const override { return windField_.representativeSpeed(); }
+    double currentWindDirDeg() const override { return windField_.currentDirectionDeg(); }
+    double currentLeakRate() const override { return sourceController_.currentLeakRate(); }
+
+    void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override;
+    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override;
+
+private:
+    double terrainTransmittance(double x, double y, double zWorld, double sigmaZ) const;
+    double concentrationAt(double x, double y, double zWorld) const;
+
+private:
+    Grid3D grid_{};
+    const ITerrain* terrainRaw_{nullptr};
+    SimulationConfig config_{};
+
+    double t_{0.0};
+    mutable float maxC_{0.0f};
+
+    TerrainSampler terrainSampler_{};
+    TerrainAwareWindField windField_{};
+    LeakSourceController sourceController_{};
+};
+</file>
+
+<file path="GaussianPuffModel.cpp">
+#include "GaussianPuffModel.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr double kPi = 3.1415926535897932384626433832795;
+constexpr double kSqrt2Pi3 = 15.749609945722419;
+}
+
+bool GaussianPuffModel::initialize(
+    const Grid3D& grid,
+    const ITerrain* terrain,
+    const SimulationConfig& config,
+    std::string& err)
+{
+    err.clear();
+    grid_ = grid;
+    terrainRaw_ = terrain;
+    config_ = config;
+    config_.model = SimulationModelType::GaussianPuff;
+    t_ = 0.0;
+    lastReleaseT_ = 0.0;
+    maxC_ = 0.0f;
+    puffs_.clear();
+
+    try {
+        grid_.validate();
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+
+    if (!terrainRaw_) {
+        err = "GaussianPuffModel: terrain is null.";
+        return false;
+    }
+    if (!terrainRaw_->isValid()) {
+        err = "GaussianPuffModel: terrain invalid.";
+        return false;
+    }
+
+    if (!terrainSampler_.initialize(grid_, terrainRaw_, err)) {
+        return false;
+    }
+
+    const double groundAtSource = terrainSampler_.heightBilinear(config_.srcX_m, config_.srcY_m);
+    if (config_.srcZ_m <= groundAtSource + 1.0e-6) {
+        err = "GaussianPuffModel: source Z is below or at terrain.";
+        return false;
+    }
+
+    TerrainAwareWindField::Params windParams;
+    windParams.baseSpeed_mps = config_.windSpeed_mps;
+    windParams.baseDir_deg = config_.windDir_deg;
+    windParams.noise.enabled = config_.noise.enabled;
+    windParams.noise.seed = config_.noise.seed;
+    windParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    windParams.noise.windSpeedSigma_mps = config_.noise.windSpeedSigma_mps;
+    windParams.noise.windDirSigma_deg = config_.noise.windDirSigma_deg;
+    windField_.setParams(windParams);
+
+    if (!windField_.initialize(grid_, &terrainSampler_, err)) {
+        return false;
+    }
+
+    LeakSourceController::Params leakParams;
+    leakParams.baseLeakRate = config_.leakRate_kgps;
+    leakParams.noise.enabled = config_.noise.enabled;
+    leakParams.noise.seed = config_.noise.seed + 7919U;
+    leakParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    leakParams.noise.leakRelSigma = config_.noise.leakRelSigma;
+    sourceController_.setParams(leakParams);
+    sourceController_.initialize();
+
+    return true;
+}
+
+void GaussianPuffModel::reset()
+{
+    t_ = 0.0;
+    lastReleaseT_ = 0.0;
+    maxC_ = 0.0f;
+    puffs_.clear();
+    windField_.reset();
+    sourceController_.reset();
+}
+
+double GaussianPuffModel::stableDt() const
+{
+    const double U = std::max(0.25, windField_.representativeSpeed());
+    const double h = std::min({grid_.dx, grid_.dy, grid_.dz});
+    return 0.40 * h / U;
+}
+
+double GaussianPuffModel::releaseInterval() const
+{
+    if (config_.releaseInterval_s > 0.0) {
+        return config_.releaseInterval_s;
+    }
+
+    const double U = std::max(0.50, windField_.representativeSpeed());
+    const double h = std::min(grid_.dx, grid_.dy);
+    return std::clamp(0.50 * h / U, 0.05, 0.75);
+}
+
+void GaussianPuffModel::emitUntil(double tNow)
+{
+    const double interval = releaseInterval();
+    while (lastReleaseT_ + interval <= tNow + 1.0e-12) {
+        lastReleaseT_ += interval;
+
+        Puff pf;
+        pf.x = config_.srcX_m;
+        pf.y = config_.srcY_m;
+        pf.z = std::max(
+            config_.srcZ_m,
+            terrainSampler_.heightBilinear(config_.srcX_m, config_.srcY_m) + 0.25 * grid_.dz);
+        pf.age = 0.0;
+        pf.mass = std::max(0.0, sourceController_.currentLeakRate()) * interval;
+        pf.sigma0 = std::max(config_.srcRadius_m, 0.5 * std::min({grid_.dx, grid_.dy, grid_.dz}));
+
+        if (pf.mass > 0.0) {
+            puffs_.push_back(pf);
+        }
+    }
+
+    if (puffs_.size() > maxPuffs_) {
+        const std::size_t eraseCount = puffs_.size() - maxPuffs_;
+        puffs_.erase(puffs_.begin(), puffs_.begin() + static_cast<std::ptrdiff_t>(eraseCount));
+    }
+}
+
+void GaussianPuffModel::advectAll(double dt)
+{
+    const int subSteps = std::max(1, static_cast<int>(std::ceil(dt / 0.10)));
+    const double h = dt / static_cast<double>(subSteps);
+
+    for (Puff& pf : puffs_) {
+        for (int s = 0; s < subSteps; ++s) {
+            const WindSample ws = windField_.sample(pf.x, pf.y, pf.z);
+            pf.x += ws.u * h;
+            pf.y += ws.v * h;
+            pf.z += ws.w * h;
+
+            const double ground = terrainSampler_.heightBilinear(pf.x, pf.y);
+            pf.z = std::max(pf.z, ground + 0.25 * grid_.dz);
+            pf.age += h;
+
+            if (config_.decay_1ps > 0.0) {
+                pf.mass *= std::exp(-config_.decay_1ps * h);
+            }
+        }
+    }
+
+    const double marginX = 6.0 * (grid_.Nx * grid_.dx);
+    const double marginY = 6.0 * (grid_.Ny * grid_.dy);
+
+    puffs_.erase(
+        std::remove_if(
+            puffs_.begin(),
+            puffs_.end(),
+            [&](const Puff& pf) {
+                if (pf.mass < 1.0e-12) return true;
+                if (pf.age > 2.0 * config_.totalTime_s) return true;
+
+                const bool outX = (pf.x < grid_.x0 - marginX) ||
+                                  (pf.x > grid_.x0 + (grid_.Nx - 1) * grid_.dx + marginX);
+                const bool outY = (pf.y < grid_.y0 - marginY) ||
+                                  (pf.y > grid_.y0 + (grid_.Ny - 1) * grid_.dy + marginY);
+
+                return outX || outY;
+            }),
+        puffs_.end());
+}
+
+double GaussianPuffModel::sigmaAt(const Puff& pf) const
+{
+    const double age = std::max(1.0e-6, pf.age);
+    return std::sqrt(
+        pf.sigma0 * pf.sigma0 +
+        2.0 * std::max(0.0, config_.K_m2ps) * age +
+        std::pow(0.03 * std::max(0.5, windField_.representativeSpeed()) * age, 2.0));
+}
+
+double GaussianPuffModel::terrainTransmittance(const Puff& pf, double x, double y, double zWorld, double sigma) const
+{
+    const double hMax = terrainSampler_.maxHeightAlongRay(pf.x, pf.y, x, y, 24);
+    const double zLine = 0.5 * (pf.z + zWorld);
+    const double clearance = zLine + sigma - hMax;
+    const double scale = std::max(0.5, 2.0 * sigma);
+    return std::clamp(0.5 + 0.5 * clearance / scale, 0.05, 1.0);
+}
+
+double GaussianPuffModel::contribution(const Puff& pf, double x, double y, double zWorld) const
+{
+    const double sigma = sigmaAt(pf);
+    const double dz = zWorld - pf.z;
+    if (std::abs(dz) > 4.0 * sigma) {
+        return 0.0;
+    }
+
+    const double dx = x - pf.x;
+    const double dy = y - pf.y;
+    const double r2 = dx * dx + dy * dy + dz * dz;
+
+    const double norm = pf.mass / (kSqrt2Pi3 * sigma * sigma * sigma);
+    const double gauss = std::exp(-0.5 * r2 / (sigma * sigma));
+    const double trans = terrainTransmittance(pf, x, y, zWorld, sigma);
+
+    double c = norm * gauss * trans;
+    if (!std::isfinite(c) || c < 0.0) {
+        c = 0.0;
+    }
+    return c;
+}
+
+double GaussianPuffModel::step()
+{
+    if (t_ >= config_.totalTime_s - 1.0e-12) {
+        return t_;
+    }
+
+    double dt = std::max(1.0e-9, config_.dt_s);
+    if (config_.autoClampDt) {
+        dt = std::min(dt, stableDt());
+    }
+    dt = std::min(dt, config_.totalTime_s - t_);
+    dt = std::max(1.0e-9, dt);
+
+    windField_.advance(dt);
+    sourceController_.advance(dt);
+
+    const double tNext = t_ + dt;
+    emitUntil(tNext);
+    advectAll(dt);
+
+    t_ = tNext;
+    return t_;
+}
+
+void GaussianPuffModel::extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const
+{
+    zIndex = std::clamp(zIndex, 0, grid_.Nz - 1);
+    outSlice.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    const double zSlice = grid_.z(zIndex);
+
+    for (const Puff& pf : puffs_) {
+        const double sigma = sigmaAt(pf);
+        if (std::abs(zSlice - pf.z) > 4.0 * sigma) {
+            continue;
+        }
+
+        const double span = 4.0 * sigma;
+        const int i0 = std::clamp(
+            static_cast<int>(std::floor((pf.x - span - grid_.x0) / grid_.dx)),
+            0, grid_.Nx - 1);
+        const int i1 = std::clamp(
+            static_cast<int>(std::ceil((pf.x + span - grid_.x0) / grid_.dx)),
+            0, grid_.Nx - 1);
+        const int j0 = std::clamp(
+            static_cast<int>(std::floor((pf.y - span - grid_.y0) / grid_.dy)),
+            0, grid_.Ny - 1);
+        const int j1 = std::clamp(
+            static_cast<int>(std::ceil((pf.y + span - grid_.y0) / grid_.dy)),
+            0, grid_.Ny - 1);
+
+        for (int j = j0; j <= j1; ++j) {
+            const double y = grid_.y(j);
+            for (int i = i0; i <= i1; ++i) {
+                const double x = grid_.x(i);
+                const double c = contribution(pf, x, y, zSlice);
+                const std::size_t id = static_cast<std::size_t>(i) +
+                                       static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx);
+                outSlice[id] += static_cast<float>(c);
+            }
+        }
+    }
+
+    for (float v : outSlice) {
+        outMax = std::max(outMax, v);
+    }
+    maxC_ = outMax;
+}
+
+void GaussianPuffModel::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
+{
+    outGrid.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+    outMax = 0.0f;
+
+    std::vector<float> tmp;
+    float tmpMax = 0.0f;
+    const float dz = static_cast<float>(grid_.dz);
+
+    for (int k = 0; k < grid_.Nz; ++k) {
+        const double z = grid_.z(k);
+        extractSliceXY(k, tmp, tmpMax);
+
+        for (int j = 0; j < grid_.Ny; ++j) {
+            const double y = grid_.y(j);
+            for (int i = 0; i < grid_.Nx; ++i) {
+                const double x = grid_.x(i);
+                const double ground = terrainSampler_.heightBilinear(x, y);
+                if (z <= ground) {
+                    continue;
+                }
+
+                const std::size_t id = static_cast<std::size_t>(i) +
+                                       static_cast<std::size_t>(j) * static_cast<std::size_t>(grid_.Nx);
+                outGrid[id] += tmp[id] * dz;
+            }
+        }
+    }
+
+    for (float v : outGrid) {
+        outMax = std::max(outMax, v);
+    }
+    maxC_ = outMax;
+}
+</file>
+
+<file path="GaussianPuffModel.h">
+#pragma once
+#include <vector>
+
+#include "ISimulationModel.h"
+#include "LeakSourceController.h"
+#include "TerrainSampler.h"
+#include "WindField.h"
+
+class GaussianPuffModel final : public ISimulationModel
+{
+public:
+    GaussianPuffModel() = default;
+
+    SimulationModelType modelType() const override
+    {
+        return SimulationModelType::GaussianPuff;
+    }
+
+    bool initialize(
+        const Grid3D& grid,
+        const ITerrain* terrain,
+        const SimulationConfig& config,
+        std::string& err) override;
+
+    void reset() override;
+    double step() override;
+    double stableDt() const override;
+
+    double time() const override { return t_; }
+    float maxC() const override { return maxC_; }
+
+    const Grid3D& grid() const override { return grid_; }
+    const SimulationConfig& config() const override { return config_; }
+
+    double currentWindSpeed() const override { return windField_.representativeSpeed(); }
+    double currentWindDirDeg() const override { return windField_.currentDirectionDeg(); }
+    double currentLeakRate() const override { return sourceController_.currentLeakRate(); }
+
+    void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override;
+    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override;
+
+private:
+    struct Puff
+    {
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        double age = 0.0;
+        double mass = 0.0;
+        double sigma0 = 1.0;
+    };
+
+    double releaseInterval() const;
+    void emitUntil(double tNow);
+    void advectAll(double dt);
+
+    double sigmaAt(const Puff& pf) const;
+    double terrainTransmittance(const Puff& pf, double x, double y, double zWorld, double sigma) const;
+    double contribution(const Puff& pf, double x, double y, double zWorld) const;
+
+private:
+    Grid3D grid_{};
+    const ITerrain* terrainRaw_{nullptr};
+    SimulationConfig config_{};
+
+    double t_{0.0};
+    double lastReleaseT_{0.0};
+    mutable float maxC_{0.0f};
+
+    TerrainSampler terrainSampler_{};
+    TerrainAwareWindField windField_{};
+    LeakSourceController sourceController_{};
+
+    std::vector<Puff> puffs_;
+    std::size_t maxPuffs_{4000};
+};
+</file>
+
+<file path="Grid3D.h">
+#pragma once
+#include <algorithm>
+#include <cstddef>
+#include <stdexcept>
+
+/**
+ * @file Grid3D.h
+ * @brief 三维笛卡尔均匀网格定义
+ *
+ * 【设计目的】
+ * 定义气体扩散模拟所需的三维计算网格，采用结构化（struct）存储最小必要信息。
+ * 网格采用均匀间距，适合有限差分方法求解对流-扩散方程。
+ *
+ * 【坐标系约定】
+ * - 原点 (x0, y0, z0) 为网格角点，向正方向延伸
+ * - X轴：东西向，右东左西
+ * - Y轴：南北向，前北后南（惯例）
+ * - Z轴：垂直向上，重力反方向
+ *
+ * 【单位】
+ * - 水平距离：米（m）
+ * - 垂直距离：米（m）
+ * - 时间步长：由 Simulator3D 控制
+ *
+ * 【网格拓扑】
+ * 网格点总数 = Nx × Ny × Nz
+ * - Nx: X方向网格点数
+ * - Ny: Y方向网格点数
+ * - Nz: Z方向网格点数
+ *
+ * 【索引映射】
+ * 三维索引 (i,j,k) 映射到一维存储索引：
+ *   idx = i + Nx * (j + Ny * k)
+ * 其中 0 ≤ i < Nx, 0 ≤ j < Ny, 0 ≤ k < Nz
+ *
+ * 【边界条件类型】
+ * - 水平边界（X/Y）：开放边界，气体可自由流出
+ * - 底部边界（Z=z0）：地形表面，固体边界（气体不可穿透）
+ * - 顶部边界（Z=zTop）：开放边界，模拟域上盖
+ *
+ * 【与地形的交互】
+ * - 网格的 z0 通常设置为略低于地形最低点
+ * - 地形高度通过 ITerrain 接口查询，用于标记固体单元格
+ */
+struct Grid3D {
+    int Nx = 0;              ///< X方向网格点数（必须 > 1）
+    int Ny = 0;              ///< Y方向网格点数（必须 > 1）
+    int Nz = 0;              ///< Z方向网格点数（必须 > 1）
+
+    double x0 = 0.0;         ///< 网格原点在X方向的坐标（米，投影坐标系）
+    double y0 = 0.0;         ///< 网格原点在Y方向的坐标（米，投影坐标系）
+    double z0 = 0.0;         ///< 网格底面Z坐标（米，通常略低于地形最低点）
+
+    double dx = 1.0;         ///< X方向网格间距（米，必须 > 0）
+    double dy = 1.0;         ///< Y方向网格间距（米，必须 > 0）
+    double dz = 1.0;         ///< Z方向网格间距（米，必须 > 0）
+
+    /**
+     * @brief 计算单个网格单元的体积
+     * @return 体积（立方米）
+     *
+     * 【物理意义】
+     * 用于质量守恒计算：源强(kg/s) / 单元体积(m³) = 源浓度增量(kg/m³/s)
+     */
+    double cellVolume() const { return dx * dy * dz; }
+
+    /**
+     * @brief 将三维网格索引转换为一维存储索引
+     * @param i X方向索引 [0, Nx-1]
+     * @param j Y方向索引 [0, Ny-1]
+     * @param k Z方向索引 [0, Nz-1]
+     * @return 一维数组中的位置索引
+     *
+     * 【使用场景】
+     * Simulator3D 中使用一维向量存储三维浓度场 C(i,j,k)，
+     * 调用此函数进行索引转换以访问特定网格点的数据。
+     */
+    inline std::size_t idx(int i, int j, int k) const {
+        return static_cast<std::size_t>(i)
+             + static_cast<std::size_t>(Nx) * (static_cast<std::size_t>(j)
+             + static_cast<std::size_t>(Ny) * static_cast<std::size_t>(k));
+    }
+
+    /**
+     * @brief 验证网格参数的有效性
+     * @throw std::runtime_error 当参数无效时抛出异常
+     *
+     * 【检查项目】
+     * - Nx, Ny, Nz 必须大于1（保证网格至少2×2×2）
+     * - dx, dy, dz 必须大于0（保证网格间距有效）
+     *
+     * 【调用时机】
+     * 通常在 Simulator3D::initialize() 中调用，确保模拟开始前网格有效。
+     */
+    void validate() const {
+        if (Nx <= 1 || Ny <= 1 || Nz <= 1)
+            throw std::runtime_error("Grid3D: Nx/Ny/Nz must be > 1");
+        if (dx <= 0 || dy <= 0 || dz <= 0)
+            throw std::runtime_error("Grid3D: dx/dy/dz must be > 0");
+    }
+
+    /**
+     * @brief 获取指定X方向索引对应的实际坐标
+     * @param i X方向索引 [0, Nx-1]
+     * @return X坐标（米）
+     */
+    double x(int i) const { return x0 + dx * i; }
+
+    /**
+     * @brief 获取指定Y方向索引对应的实际坐标
+     * @param j Y方向索引 [0, Ny-1]
+     * @return Y坐标（米）
+     */
+    double y(int j) const { return y0 + dy * j; }
+
+    /**
+     * @brief 获取指定Z方向索引对应的实际坐标
+     * @param k Z方向索引 [0, Nz-1]
+     * @return Z坐标（米）
+     */
+    double z(int k) const { return z0 + dz * k; }
+};
+</file>
+
+<file path="ISimulationModel.h">
+#pragma once
+#include <string>
+#include <vector>
+
+#include "Grid3D.h"
+#include "ITerrain.h"
+#include "SimulationConfig.h"
+
+class ISimulationModel
+{
+public:
+    virtual ~ISimulationModel() = default;
+
+    virtual SimulationModelType modelType() const = 0;
+
+    virtual bool initialize(
+        const Grid3D& grid,
+        const ITerrain* terrain,
+        const SimulationConfig& config,
+        std::string& err) = 0;
+
+    virtual void reset() = 0;
+    virtual double step() = 0;
+    virtual double stableDt() const = 0;
+
+    virtual double time() const = 0;
+    virtual float maxC() const = 0;
+
+    virtual const Grid3D& grid() const = 0;
+    virtual const SimulationConfig& config() const = 0;
+
+    virtual double currentWindSpeed() const = 0;
+    virtual double currentWindDirDeg() const = 0;
+    virtual double currentLeakRate() const = 0;
+
+    virtual void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const = 0;
+
+    virtual void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const = 0;
+};
+</file>
+
+<file path="ITerrain.h">
+#pragma once
+
+/**
+ * @file ITerrain.h
+ * @brief 地形高度查询接口
+ *
+ * 【设计目的】
+ * 提供统一的地形高度查询抽象层，使气体扩散模拟器能够与任意地形数据源
+ * （解析GeoTIFF、程序生成、平地等）进行解耦交互。
+ *
+ * 【坐标系约定】
+ * - 采用右手笛卡尔坐标系
+ * - X轴向右为正，Y轴向前为正（地图视图的传统朝向）
+ * - Z轴向上为正，代表地形高度（海平面以上）
+ *
+ * 【单位】
+ * - 水平距离：米（m）
+ * - 高度：米（m），相对于海平面的绝对高度
+ *
+ * 【数据流】
+ * MainWindow → Simulator3D → ITerrain（查询地形约束）
+ * 模拟器在构建网格时查询每个节点的地面高度，用于标记固体单元格
+ */
+class ITerrain {
+public:
+    virtual ~ITerrain() = default;
+
+    /**
+     * @brief 查询指定坐标点的地形高度
+     * @param x X坐标（米，相对于地形原点）
+     * @param y Y坐标（米，相对于地形原点）
+     * @return 地形高度（米，相对于海平面）
+     *
+     * 【物理意义】
+     * 返回地面以上的高度值，用于判断模拟网格点是否位于地形表面以下。
+     * 位于地形以下的点被标记为固体边界，气体无法穿透。
+     *
+     * 【边界条件】
+     * - 输入坐标超出地形范围：返回地形边缘外推值或NaN，由具体实现决定
+     * - 地形无效时：isValid()返回false，模拟器会跳过该地形
+     */
+    virtual float height(double x, double y) const = 0;
+
+    /**
+     * @brief 检查地形数据是否有效
+     * @return true=有效，false=无效（如数据未加载、格式错误等）
+     *
+     * 【用途】
+     * 在模拟开始前进行有效性检查，防止因地形数据问题导致模拟崩溃。
+     */
+    virtual bool isValid() const { return true; }
+};
+</file>
+
+<file path="LeakSourceController.h">
+#pragma once
+#include <algorithm>
+#include <random>
+
+class LeakSourceController
+{
+public:
+    struct NoiseParams
+    {
+        bool enabled = true;
+        unsigned int seed = 12143;
+        double updateEvery_s = 1.0;
+        double leakRelSigma = 0.10;
+    };
+
+    struct Params
+    {
+        double baseLeakRate = 1.0;
+        NoiseParams noise;
+    };
+
+    LeakSourceController() = default;
+    explicit LeakSourceController(const Params& p) : params_(p) {}
+
+    void setParams(const Params& p) { params_ = p; }
+    const Params& params() const { return params_; }
+
+    void initialize()
+    {
+        reset();
+    }
+
+    void reset()
+    {
+        t_ = 0.0;
+        rng_ = std::mt19937(params_.noise.seed);
+        nextNoiseUpdateT_ = 0.0;
+        refreshNoise();
+    }
+
+    void advance(double dt)
+    {
+        t_ += std::max(0.0, dt);
+        if (!params_.noise.enabled) return;
+        if (t_ + 1.0e-12 >= nextNoiseUpdateT_) {
+            refreshNoise();
+        }
+    }
+
+    double currentLeakRate() const { return effLeakRate_; }
+    double time() const { return t_; }
+
+private:
+    void refreshNoise()
+    {
+        double leak = params_.baseLeakRate;
+        if (params_.noise.enabled) {
+            const double rel = 1.0 + norm_(rng_) * params_.noise.leakRelSigma;
+            leak *= std::max(0.0, rel);
+        }
+        effLeakRate_ = std::max(0.0, leak);
+        nextNoiseUpdateT_ = t_ + std::max(1.0e-6, params_.noise.updateEvery_s);
+    }
+
+private:
+    Params params_{};
+    double t_{0.0};
+    double nextNoiseUpdateT_{0.0};
+    double effLeakRate_{0.0};
+    std::mt19937 rng_{};
+    std::normal_distribution<double> norm_{0.0, 1.0};
+};
+</file>
+
+<file path="main.cpp">
+/**
+ * @file main.cpp
+ * @brief GasDispersionDesktop 程序入口
+ *
+ * 【程序说明】
+ * GasDispersionDesktop - 基于Qt6的三维气体扩散仿真可视化桌面应用
+ *
+ * 【功能概述】
+ * 本程序实现了一个交互式的三维气体扩散仿真环境，用户可以：
+ * - 配置地形（平地/DEM/程序化生成）
+ * - 设置风场、扩散系数、源项参数
+ * - 实时预览地形和浓度分布
+ * - 导出仿真数据用于后处理分析
+ *
+ * 【程序流程】
+ * 1. 创建QApplication对象（管理Qt应用程序状态）
+ * 2. 创建MainWindow主窗口对象
+ * 3. 显示主窗口
+ * 4. 进入Qt事件循环（等待用户交互）
+ *
+ * 【依赖项】
+ * - Qt6 Core: Qt核心功能
+ * - Qt6 Widgets: GUI组件库
+ * - MainWindow: 主窗口类（包含所有UI和仿真逻辑）
+ *
+ * 【编译要求】
+ * - C++20编译器
+ * - Qt6库（Core + Widgets模块）
+ *
+ * 【运行说明】
+ * 直接运行生成的GasDispersionDesktop可执行文件即可启动程序。
+ */
+
+#include <QtWidgets/QApplication>
+#include "MainWindow.h"
+
+int main(int argc, char *argv[]) {
+    QApplication app(argc, argv);
+    MainWindow w;
+    w.show();
+    return app.exec();
+}
+</file>
+
+<file path="MainWindow.cpp">
+#include "MainWindow.h"
+#include "ColorMap.h"
+#include "ExporterCsv.h"
+
+#include <QtWidgets/QWidget>
+#include <QtWidgets/QFormLayout>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QGroupBox>
+#include <QtWidgets/QSplitter>
+#include <QtWidgets/QFileDialog>
+#include <QtWidgets/QSizePolicy>
+
+#include <QDir>
+#include <QPainter>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
+#include <string>
+
+static QDoubleSpinBox* makeDsb(double minV, double maxV, double step, double val, int decimals = 3)
+{
+    auto* sb = new QDoubleSpinBox();
+    sb->setRange(minV, maxV);
+    sb->setDecimals(decimals);
+    sb->setSingleStep(step);
+    sb->setValue(val);
+    return sb;
+}
+
+static QSpinBox* makeSsb(int minV, int maxV, int step, int val)
+{
+    auto* sb = new QSpinBox();
+    sb->setRange(minV, maxV);
+    sb->setSingleStep(step);
+    sb->setValue(val);
+    return sb;
+}
+
+static QImage applyFixedPadding(const QImage& img, double padFrac, const QColor& fill)
+{
+    const int W = img.width();
+    const int H = img.height();
+    const int padX = static_cast<int>(std::round(W * padFrac));
+    const int padY = static_cast<int>(std::round(H * padFrac));
+    const int CW = W + 2 * padX;
+    const int CH = H + 2 * padY;
+
+    QImage canvas(CW, CH, QImage::Format_RGB32);
+    canvas.fill(fill);
+
+    QPainter p(&canvas);
+    p.drawImage(padX, padY, img);
+    return canvas;
+}
+
+MainWindow::TerrainMode MainWindow::terrainMode() const
+{
+    return static_cast<TerrainMode>(cbTerrainMode_->currentIndex());
+}
+
+const ITerrain* MainWindow::currentTerrain() const
+{
+    const auto mode = terrainMode();
+    if (mode == TerrainMode::Dem) {
+        if (hasDem_ && dem_.isValid()) return &dem_;
+        return nullptr;
+    }
+    if (mode == TerrainMode::Procedural) return &proc_;
+    return &flat_;
+}
+
+QString MainWindow::framesDir() const
+{
+    return QDir::current().filePath("outputs/frames");
+}
+
+void MainWindow::appendLog(const QString& s)
+{
+    log_->appendPlainText(s);
+}
+
+void MainWindow::updateDomainInfo()
+{
+    const double Lx = sbLx_->value();
+    const double Ly = sbLy_->value();
+    const double dx = std::max(1e-9, sbDx_->value());
+    const double dy = std::max(1e-9, sbDy_->value());
+    const int Nx = std::max(2, static_cast<int>(std::floor(Lx / dx)) + 1);
+    const int Ny = std::max(2, static_cast<int>(std::floor(Ly / dy)) + 1);
+    domainInfo_->setText(QString("Nx=%1 Ny=%2 (non-DEM)").arg(Nx).arg(Ny));
+}
+
+void MainWindow::enforceSourceCenterIfNeeded()
+{
+    if (!cbAutoCenterSrc_ || !cbAutoCenterSrc_->isChecked()) return;
+    if (terrainMode() == TerrainMode::Dem) return;
+    if (!terrainPreviewReady_) return;
+
+    const double xMin = tx0_;
+    const double yMin = ty0_;
+    const double xMax = tx0_ + (tNx_ - 1) * tdx_;
+    const double yMax = ty0_ + (tNy_ - 1) * tdy_;
+    const double cx = 0.5 * (xMin + xMax);
+    const double cy = 0.5 * (yMin + yMax);
+
+    const double x = sbSrcX_->value();
+    const double y = sbSrcY_->value();
+
+    const double eps = 1e-9;
+    const bool out =
+        (x < xMin - eps) || (x > xMax + eps) ||
+        (y < yMin - eps) || (y > yMax + eps);
+
+    const bool atCorner =
+        (std::abs(x - xMin) < 1e-6) && (std::abs(y - yMin) < 1e-6);
+
+    if (out || atCorner) {
+        sbSrcX_->setValue(cx);
+        sbSrcY_->setValue(cy);
+        appendLog(QString("[SRC] auto-centered to domain center: (%1, %2)")
+                  .arg(cx, 0, 'f', 2).arg(cy, 0, 'f', 2));
+        syncSliceWithSourceIfNeeded();
+    }
+}
+
+double MainWindow::clampSliceToFluid(double z) const
+{
+    if (!terrainPreviewReady_) return z;
+    const double zMin = static_cast<double>(tMin_);
+    const double zTop = static_cast<double>(tMax_) + sbZTopMargin_->value();
+    return std::clamp(z, zMin, zTop);
+}
+
+double MainWindow::effectiveZSlice() const
+{
+    return clampSliceToFluid(sbZSlice_->value());
+}
+
+double MainWindow::aglSliceZ() const
+{
+    return clampSliceToFluid(static_cast<double>(groundAtSource()) + sbAgl_->value());
+}
+
+int MainWindow::zToK(double z) const
+{
+    const auto& g = engine_.grid();
+    if (g.Nz <= 1) return 0;
+    const int k = static_cast<int>(std::round((z - g.z0) / g.dz));
+    return std::clamp(k, 0, g.Nz - 1);
+}
+
+void MainWindow::onFollowSliceToggled(bool on)
+{
+    if (on) syncSliceWithSourceIfNeeded();
+}
+
+void MainWindow::syncSliceWithSourceIfNeeded()
+{
+    if (!cbFollowSlice_->isChecked()) return;
+    sbZSlice_->blockSignals(true);
+    sbZSlice_->setValue(sbSrcZ_->value());
+    sbZSlice_->blockSignals(false);
+}
+
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent)
+{
+    setWindowTitle("GasDispersionDesktop");
+    resize(1400, 800);
+
+    auto* central = new QWidget(this);
+    setCentralWidget(central);
+
+    auto* root = new QVBoxLayout(central);
+
+    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    root->addWidget(splitter, 1);
+
+    leftScroll_ = new QScrollArea(splitter);
+    leftScroll_->setWidgetResizable(true);
+
+    auto* leftInner = new QWidget();
+    leftScroll_->setWidget(leftInner);
+
+    auto* leftLayout = new QVBoxLayout(leftInner);
+    leftLayout->setSpacing(8);
+
+    auto* right = new QWidget(splitter);
+    auto* rightLayout = new QVBoxLayout(right);
+    rightLayout->setContentsMargins(6, 6, 6, 6);
+
+    view_ = new QLabel();
+    view_->setMinimumSize(640, 520);
+    view_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    view_->setAlignment(Qt::AlignCenter);
+    view_->setText("No terrain yet. Click Preview.");
+
+    status_ = new QLabel();
+    status_->setText("Ready.");
+
+    rightLayout->addWidget(view_, 1);
+    rightLayout->addWidget(status_, 0);
+
+    splitter->setStretchFactor(0, 0);
+    splitter->setStretchFactor(1, 1);
+    leftScroll_->setMinimumWidth(360);
+    leftInner->setMinimumWidth(340);
+    splitter->setCollapsible(0, false);
+    splitter->setSizes(QList<int>{400, 1000});
+    splitter->setHandleWidth(8);
+
+    auto* gbTerrain = new QGroupBox("Terrain", leftInner);
+    auto* terrainForm = new QFormLayout(gbTerrain);
+
+    cbTerrainMode_ = new QComboBox(gbTerrain);
+    cbTerrainMode_->addItem("Flat");
+    cbTerrainMode_->addItem("DEM (GeoTIFF)");
+    cbTerrainMode_->addItem("Procedural");
+    terrainForm->addRow("Mode", cbTerrainMode_);
+
+    leDemTif_ = new QLineEdit(gbTerrain);
+    btnPickDem_ = new QPushButton("Pick DEM .tif", gbTerrain);
+    btnConvertLoadDem_ = new QPushButton("Convert+Load DEM", gbTerrain);
+    sbDemStride_ = makeSsb(1, 50, 1, 2);
+    demInfo_ = new QLabel("DEM: (none)", gbTerrain);
+
+    terrainForm->addRow("DEM path", leDemTif_);
+    terrainForm->addRow(btnPickDem_);
+    terrainForm->addRow("Stride (downsample)", sbDemStride_);
+    terrainForm->addRow(btnConvertLoadDem_);
+    terrainForm->addRow(demInfo_);
+
+    sbFlatZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
+    terrainForm->addRow("Flat z", sbFlatZ_);
+
+    sbProcBaseZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
+    sbProcPeakA_ = makeDsb(0, 1000, 1.0, 100.0, 2);
+    sbProcSigma_ = makeDsb(1, 100000, 1.0, 200.0, 2);
+    terrainForm->addRow("Proc base z", sbProcBaseZ_);
+    terrainForm->addRow("Proc peak A", sbProcPeakA_);
+    terrainForm->addRow("Proc sigma", sbProcSigma_);
+
+    btnPreviewTerrain_ = new QPushButton("Preview Terrain", gbTerrain);
+    terrainForm->addRow(btnPreviewTerrain_);
+
+    leftLayout->addWidget(gbTerrain);
+
+    auto* gbDomain = new QGroupBox("Domain (Cartesian)", leftInner);
+    auto* domForm = new QFormLayout(gbDomain);
+
+    sbX0_ = makeDsb(-1e6, 1e6, 1.0, 0.0, 2);
+    sbY0_ = makeDsb(-1e6, 1e6, 1.0, 0.0, 2);
+    sbLx_ = makeDsb(1.0, 1e6, 1.0, 200.0, 2);
+    sbLy_ = makeDsb(1.0, 1e6, 1.0, 200.0, 2);
+    sbDx_ = makeDsb(0.1, 1000.0, 0.1, 1.0, 2);
+    sbDy_ = makeDsb(0.1, 1000.0, 0.1, 1.0, 2);
+    domainInfo_ = new QLabel("Nx=? Ny=?", gbDomain);
+
+    domForm->addRow("x0", sbX0_);
+    domForm->addRow("y0", sbY0_);
+    domForm->addRow("Lx", sbLx_);
+    domForm->addRow("Ly", sbLy_);
+    domForm->addRow("dx", sbDx_);
+    domForm->addRow("dy", sbDy_);
+    domForm->addRow(domainInfo_);
+
+    leftLayout->addWidget(gbDomain);
+
+    auto* gbZ = new QGroupBox("Vertical", leftInner);
+    auto* zForm = new QFormLayout(gbZ);
+
+    sbDz_ = makeDsb(0.1, 1000.0, 0.1, 1.0, 2);
+    sbZTopMargin_ = makeDsb(0.0, 20000.0, 1.0, 50.0, 2);
+    sbNzMax_ = makeSsb(2, 2000, 1, 120);
+
+    sbZSlice_ = makeDsb(-1000.0, 20000.0, 0.5, 2.0, 2);
+    cbFollowSlice_ = new QCheckBox("Follow slice Z = srcZ", gbZ);
+    cbFollowSlice_->setChecked(true);
+
+    zForm->addRow("dz", sbDz_);
+    zForm->addRow("Z top margin", sbZTopMargin_);
+    zForm->addRow("Nz max", sbNzMax_);
+    zForm->addRow("Z slice", sbZSlice_);
+    zForm->addRow(cbFollowSlice_);
+
+    leftLayout->addWidget(gbZ);
+
+    auto* gbPhys = new QGroupBox("Physics", leftInner);
+    auto* physForm = new QFormLayout(gbPhys);
+
+    cbModel_ = new QComboBox(gbPhys);
+    cbModel_->addItem("Terrain-aware Eulerian (CFD)");
+    cbModel_->addItem("Terrain-aware Gaussian plume");
+    cbModel_->addItem("Terrain-aware Gaussian puff");
+
+    sbWindSpeed_ = makeDsb(0.0, 100.0, 0.1, 2.0, 2);
+    sbWindDir_   = makeDsb(0.0, 360.0, 1.0, 0.0, 1);
+    sbK_         = makeDsb(0.0, 1000.0, 0.01, 2.0, 4);
+    sbDecay_     = makeDsb(0.0, 10.0, 0.001, 0.0, 6);
+
+    physForm->addRow("Model", cbModel_);
+    physForm->addRow("Wind speed (m/s)", sbWindSpeed_);
+    physForm->addRow("Wind dir (deg)", sbWindDir_);
+    physForm->addRow("K (m^2/s)", sbK_);
+    physForm->addRow("Decay (1/s)", sbDecay_);
+
+    leftLayout->addWidget(gbPhys);
+
+    auto* gbTime = new QGroupBox("Time & Output", leftInner);
+    auto* timeForm = new QFormLayout(gbTime);
+
+    sbTotalTime_ = makeDsb(1.0, 36000.0, 10.0, 60.0, 1);
+    sbDt_        = makeDsb(1e-4, 10.0, 0.01, 0.05, 4);
+    cbAutoClampDt_ = new QCheckBox("Auto clamp dt (stable)", gbTime);
+    cbAutoClampDt_->setChecked(true);
+    cbExportCsv_ = new QCheckBox("Export CSV frames", gbTime);
+    cbExportCsv_->setChecked(true);
+    sbExportInterval_ = makeDsb(0.01, 10.0, 0.05, 0.20, 2);
+
+    cbExportTwoSlices_ = new QCheckBox("Export TWO slices per frame (zSlice + AGL)", gbTime);
+    cbExportTwoSlices_->setChecked(true);
+
+    cbExportColumn_ = new QCheckBox("Export column integral (3rd file per frame)", gbTime);
+    cbExportColumn_->setChecked(false);
+
+    timeForm->addRow("Total (s)", sbTotalTime_);
+    timeForm->addRow("dt (s)", sbDt_);
+    timeForm->addRow(cbAutoClampDt_);
+    timeForm->addRow(cbExportCsv_);
+    timeForm->addRow("Export interval (s)", sbExportInterval_);
+    timeForm->addRow(cbExportTwoSlices_);
+    timeForm->addRow(cbExportColumn_);
+
+    leftLayout->addWidget(gbTime);
+
+    auto* gbViz = new QGroupBox("Visualization", leftInner);
+    auto* vizForm = new QFormLayout(gbViz);
+
+    cbBackgroundMode_ = new QComboBox(gbViz);
+    cbBackgroundMode_->addItem("Terrain grayscale + concentration overlay");
+    cbBackgroundMode_->addItem("Blue background (concentration only)");
+    cbBackgroundMode_->setCurrentIndex(1);
+    vizForm->addRow("Background", cbBackgroundMode_);
+
+    sbDisplayCutoffRel_ = makeDsb(0.0, 0.5, 1e-3, 1e-3, 6);
+    vizForm->addRow("Cutoff (relative to sliceMax)", sbDisplayCutoffRel_);
+
+    leftLayout->addWidget(gbViz);
+
+    auto* gbSrc = new QGroupBox("3D Source", leftInner);
+    auto* srcForm = new QFormLayout(gbSrc);
+
+    sbSrcX_ = makeDsb(-1e12, 1e12, 1.0, 0.0, 2);
+    sbSrcY_ = makeDsb(-1e12, 1e12, 1.0, 0.0, 2);
+    sbSrcZ_ = makeDsb(-1e12, 1e12, 0.5, 2.0, 2);
+    sbSrcRadius_ = makeDsb(0.01, 1000.0, 0.05, 1.0, 2);
+    sbLeak_ = makeDsb(0.0, 1e9, 1.0, 100.0, 2);
+    sbAgl_  = makeDsb(0.0, 20000.0, 0.5, 2.0, 2);
+
+    btnSetSrcZFromGround_ = new QPushButton("Set srcZ = ground + AGL", gbSrc);
+
+    cbAutoCenterSrc_ = new QCheckBox("Auto center source in non-DEM (recommended)", gbSrc);
+    cbAutoCenterSrc_->setChecked(true);
+
+    srcForm->addRow("srcX", sbSrcX_);
+    srcForm->addRow("srcY", sbSrcY_);
+    srcForm->addRow("srcZ", sbSrcZ_);
+    srcForm->addRow("srcRadius", sbSrcRadius_);
+    srcForm->addRow("Leak strength", sbLeak_);
+    srcForm->addRow("AGL slice (m)", sbAgl_);
+    srcForm->addRow(btnSetSrcZFromGround_);
+    srcForm->addRow(cbAutoCenterSrc_);
+
+    leftLayout->addWidget(gbSrc);
+
+    auto* gbCtrl = new QGroupBox("Control", leftInner);
+    auto* ctrlLayout = new QVBoxLayout(gbCtrl);
+
+    btnRun_ = new QPushButton("Run", gbCtrl);
+    btnPause_ = new QPushButton("Pause", gbCtrl);
+    btnReset_ = new QPushButton("Reset", gbCtrl);
+
+    ctrlLayout->addWidget(btnRun_);
+    ctrlLayout->addWidget(btnPause_);
+    ctrlLayout->addWidget(btnReset_);
+
+    log_ = new QPlainTextEdit(gbCtrl);
+    log_->setReadOnly(true);
+    log_->setMaximumBlockCount(2000);
+    ctrlLayout->addWidget(log_, 1);
+
+    leftLayout->addWidget(gbCtrl);
+    leftLayout->addStretch(1);
+
+    connect(btnPickDem_, &QPushButton::clicked, this, &MainWindow::onPickDemClicked);
+    connect(btnConvertLoadDem_, &QPushButton::clicked, this, &MainWindow::onConvertLoadDemClicked);
+    connect(btnPreviewTerrain_, &QPushButton::clicked, this, &MainWindow::onPreviewTerrainClicked);
+
+    connect(cbTerrainMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onTerrainParamsChanged);
+
+    connect(sbFlatZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbProcBaseZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbProcPeakA_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbProcSigma_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+
+    connect(sbX0_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbY0_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbLx_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbLy_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbDx_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbDy_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+
+    connect(cbModel_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        running_ = false;
+        timer_->stop();
+        simReady_ = false;
+        if (terrainPreviewReady_) renderTerrainOnly();
+        appendLog("[Model] changed. Rebuild on next Run.");
+    });
+
+    connect(cbBackgroundMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        if (simReady_) renderTerrainAndSlice();
+        else if (terrainPreviewReady_) renderTerrainOnly();
+    });
+
+    connect(sbDisplayCutoffRel_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        if (simReady_) renderTerrainAndSlice();
+    });
+
+    connect(btnSetSrcZFromGround_, &QPushButton::clicked, this, &MainWindow::onSetSrcZFromGroundClicked);
+
+    connect(btnRun_, &QPushButton::clicked, this, &MainWindow::onRunClicked);
+    connect(btnPause_, &QPushButton::clicked, this, &MainWindow::onPauseClicked);
+    connect(btnReset_, &QPushButton::clicked, this, &MainWindow::onResetClicked);
+
+    connect(cbFollowSlice_, &QCheckBox::toggled, this, &MainWindow::onFollowSliceToggled);
+
+    timer_ = new QTimer(this);
+    timer_->setInterval(15);
+    connect(timer_, &QTimer::timeout, this, &MainWindow::onTick);
+
+    updateDomainInfo();
+    appendLog("[Init] ready. Click Preview Terrain first.");
+}
+
+void MainWindow::onPickDemClicked()
+{
+    const QString f = QFileDialog::getOpenFileName(
+        this,
+        "Pick DEM GeoTIFF",
+        QDir::currentPath(),
+        "GeoTIFF (*.tif *.tiff)");
+    if (!f.isEmpty()) {
+        leDemTif_->setText(f);
+    }
+}
+
+void MainWindow::onConvertLoadDemClicked()
+{
+    const QString tifPath = leDemTif_->text().trimmed();
+    if (tifPath.isEmpty()) {
+        appendLog("[DEM] path empty.");
+        return;
+    }
+
+    const QString outDir = QDir::current().filePath("outputs/dem_cache");
+    QDir().mkpath(outDir);
+
+    const QString cmd = QString("python tools/dem_convert.py --in \"%1\" --out_dir \"%2\"")
+                            .arg(tifPath)
+                            .arg(outDir);
+    appendLog("[DEM] convert: " + cmd);
+
+    const int code = std::system(cmd.toLocal8Bit().constData());
+    if (code != 0) {
+        appendLog("[DEM] convert failed. Ensure rasterio or gdal is installed (conda-forge).");
+        return;
+    }
+
+    const QString metaPath = QDir(outDir).filePath("dem_meta.json");
+    const QString binPath  = QDir(outDir).filePath("dem_data.bin");
+
+    const bool ok = dem_.load(metaPath.toStdString(), binPath.toStdString());
+    if (!ok) {
+        appendLog("[DEM] load failed.");
+        demInfo_->setText("DEM: load failed");
+        hasDem_ = false;
+        return;
+    }
+
+    hasDem_ = true;
+    demInfo_->setText(
+        QString("DEM: ok | Nx=%1 Ny=%2 | cell=%3 | zmin=%4")
+            .arg(dem_.width())
+            .arg(dem_.height())
+            .arg(dem_.cellSize(), 0, 'f', 3)
+            .arg(dem_.minElevation(), 0, 'f', 2));
+    appendLog("[DEM] loaded ok.");
+
+    onTerrainParamsChanged();
+}
+
+void MainWindow::onTerrainParamsChanged()
+{
+    flat_.z = static_cast<float>(sbFlatZ_->value());
+
+    const double x0 = sbX0_->value();
+    const double y0 = sbY0_->value();
+    const double Lx = sbLx_->value();
+    const double Ly = sbLy_->value();
+    const double xc = x0 + 0.5 * Lx;
+    const double yc = y0 + 0.5 * Ly;
+
+    proc_.setMode(TerrainProcedural::Mode::GaussianHill);
+    proc_.setBaseZ(static_cast<float>(sbProcBaseZ_->value()));
+    proc_.setGaussian(TerrainProcedural::Gaussian{xc, yc, sbProcPeakA_->value(), sbProcSigma_->value()});
+
+    running_ = false;
+    timer_->stop();
+    simReady_ = false;
+    terrainPreviewReady_ = false;
+
+    updateDomainInfo();
+}
+
+void MainWindow::onPreviewTerrainClicked()
+{
+    QString err;
+    if (!buildTerrainPreview(err)) {
+        appendLog("[Terrain] preview failed: " + err);
+        return;
+    }
+
+    enforceSourceCenterIfNeeded();
+    renderTerrainOnly();
+    appendLog("[Terrain] preview ok.");
+}
+
+bool MainWindow::buildTerrainPreview(QString& errOut)
+{
+    errOut.clear();
+    const ITerrain* terr = currentTerrain();
+    if (!terr) {
+        errOut = "Terrain is null (DEM not loaded?)";
+        return false;
+    }
+    if (!terr->isValid()) {
+        errOut = "Terrain invalid";
+        return false;
+    }
+
+    if (terrainMode() == TerrainMode::Dem) {
+        if (!hasDem_) {
+            errOut = "DEM mode selected but DEM not loaded";
+            return false;
+        }
+
+        const int stride = std::max(1, sbDemStride_->value());
+
+        tNx_ = std::max(2, (dem_.width() - 1) / stride + 1);
+        tNy_ = std::max(2, (dem_.height() - 1) / stride + 1);
+
+        tdx_ = std::abs(dem_.dx()) * stride;
+        tdy_ = std::abs(dem_.dy()) * stride;
+
+        tx0_ = std::min(dem_.xMin(), dem_.xMax());
+        ty0_ = std::min(dem_.yMin(), dem_.yMax());
+    } else {
+        const double Lx = sbLx_->value();
+        const double Ly = sbLy_->value();
+        tdx_ = std::max(1e-9, sbDx_->value());
+        tdy_ = std::max(1e-9, sbDy_->value());
+        tNx_ = std::max(2, static_cast<int>(std::floor(Lx / tdx_)) + 1);
+        tNy_ = std::max(2, static_cast<int>(std::floor(Ly / tdy_)) + 1);
+        tx0_ = sbX0_->value();
+        ty0_ = sbY0_->value();
+    }
+
+    terrainXY_.assign(static_cast<std::size_t>(tNx_) * static_cast<std::size_t>(tNy_), 0.0f);
+    tMin_ = std::numeric_limits<float>::infinity();
+    tMax_ = -std::numeric_limits<float>::infinity();
+
+    for (int j = 0; j < tNy_; ++j) {
+        const double y = ty0_ + tdy_ * j;
+        for (int i = 0; i < tNx_; ++i) {
+            const double x = tx0_ + tdx_ * i;
+            const float h = terr->height(x, y);
+            terrainXY_[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(tNx_)] = h;
+            tMin_ = std::min(tMin_, h);
+            tMax_ = std::max(tMax_, h);
+        }
+    }
+
+    terrainPreviewReady_ = true;
+    return true;
+}
+
+void MainWindow::renderTerrainOnly()
+{
+    if (!terrainPreviewReady_) return;
+
+    const int Nx = tNx_;
+    const int Ny = tNy_;
+
+    const int maxW = 950;
+    const int maxH = 650;
+    const double sx = static_cast<double>(Nx) / maxW;
+    const double sy = static_cast<double>(Ny) / maxH;
+    const double s = std::max(1.0, std::max(sx, sy));
+    const int W = std::max(1, static_cast<int>(std::round(Nx / s)));
+    const int H = std::max(1, static_cast<int>(std::round(Ny / s)));
+
+    QImage img(W, H, QImage::Format_RGB32);
+
+    const float denom = std::max(1e-6f, tMax_ - tMin_);
+
+    const double lx = -1.0, ly = -1.0, lz = 1.0;
+    const double ln = std::sqrt(lx * lx + ly * ly + lz * lz);
+    const double Lx = lx / ln, Ly = ly / ln, Lz = lz / ln;
+
+    auto Hxy = [&](int i, int j) -> float {
+        i = std::clamp(i, 0, Nx - 1);
+        j = std::clamp(j, 0, Ny - 1);
+        return terrainXY_[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(Nx)];
+    };
+
+    for (int y = 0; y < H; ++y) {
+        const int j = std::clamp(static_cast<int>(std::round(y * s)), 0, Ny - 1);
+        for (int x = 0; x < W; ++x) {
+            const int i = std::clamp(static_cast<int>(std::round(x * s)), 0, Nx - 1);
+
+            const float h = Hxy(i, j);
+            const float n = (h - tMin_) / denom;
+
+            const float dzdx = (Hxy(i + 1, j) - Hxy(i - 1, j)) / static_cast<float>(2.0 * tdx_);
+            const float dzdy = (Hxy(i, j + 1) - Hxy(i, j - 1)) / static_cast<float>(2.0 * tdy_);
+
+            double nx = -dzdx, ny = -dzdy, nz = 1.0;
+            const double nn = std::sqrt(nx * nx + ny * ny + nz * nz);
+            nx /= nn;
+            ny /= nn;
+            nz /= nn;
+
+            const double intensity = std::max(0.0, nx * Lx + ny * Ly + nz * Lz);
+            const double shade = 0.45 + 0.55 * intensity;
+
+            int g = static_cast<int>(std::round((40.0 + 180.0 * n) * shade));
+            g = std::clamp(g, 0, 255);
+
+            img.setPixelColor(x, H - 1 - y, QColor(g, g, g));
+        }
+    }
+
+    static constexpr double kPad = 0.35;
+    const QImage canvas = applyFixedPadding(img, kPad, QColor(0, 0, 0));
+    view_->setPixmap(QPixmap::fromImage(canvas).scaled(view_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+    status_->setText(
+        QString("TERRAIN | mode=%1 | z=[%2,%3] | Nx=%4 Ny=%5")
+            .arg(cbTerrainMode_->currentText())
+            .arg(tMin_, 0, 'f', 2)
+            .arg(tMax_, 0, 'f', 2)
+            .arg(Nx)
+            .arg(Ny));
+}
+
+SimulationConfig MainWindow::readSimConfig() const
+{
+    SimulationConfig p;
+    p.model = static_cast<SimulationModelType>(cbModel_->currentIndex());
+
+    p.totalTime_s = sbTotalTime_->value();
+    p.dt_s = sbDt_->value();
+    p.autoClampDt = cbAutoClampDt_->isChecked();
+
+    p.windSpeed_mps = sbWindSpeed_->value();
+    p.windDir_deg   = sbWindDir_->value();
+    p.K_m2ps        = sbK_->value();
+    p.decay_1ps     = sbDecay_->value();
+
+    p.srcX_m        = sbSrcX_->value();
+    p.srcY_m        = sbSrcY_->value();
+    p.srcZ_m        = sbSrcZ_->value();
+    p.srcRadius_m   = sbSrcRadius_->value();
+    p.leakRate_kgps = sbLeak_->value();
+
+    p.releaseInterval_s = 0.0;
+
+    p.noise.enabled = true;
+    p.noise.seed = 42;
+    p.noise.updateEvery_s = 1.0;
+    p.noise.windSpeedSigma_mps = 0.30;
+    p.noise.windDirSigma_deg = 7.0;
+    p.noise.leakRelSigma = 0.10;
+
+    return p;
+}
+
+bool MainWindow::buildSimulation(QString& errOut)
+{
+    errOut.clear();
+    const ITerrain* terr = currentTerrain();
+    if (!terr) {
+        errOut = "Terrain null (DEM not loaded?)";
+        return false;
+    }
+    if (!terr->isValid()) {
+        errOut = "Terrain invalid";
+        return false;
+    }
+
+    if (!terrainPreviewReady_) {
+        if (!buildTerrainPreview(errOut)) return false;
+    }
+
+    Grid3D g;
+    g.Nx = tNx_;
+    g.Ny = tNy_;
+    g.x0 = tx0_;
+    g.y0 = ty0_;
+    g.dx = tdx_;
+    g.dy = tdy_;
+
+    g.z0 = static_cast<double>(tMin_);
+    g.dz = sbDz_->value();
+
+    const double zTop = static_cast<double>(tMax_) + sbZTopMargin_->value();
+    int Nz = static_cast<int>(std::floor((zTop - g.z0) / g.dz)) + 1;
+    Nz = std::clamp(Nz, 2, sbNzMax_->value());
+    g.Nz = Nz;
+
+    auto cfg = readSimConfig();
+
+    const double ground = terr->height(cfg.srcX_m, cfg.srcY_m);
+    const double minSrcZ = std::max(g.z0, ground + 0.5 * g.dz);
+    const double maxSrcZ = g.z0 + (g.Nz - 1) * g.dz;
+
+    const double srcZOld = cfg.srcZ_m;
+    cfg.srcZ_m = std::clamp(cfg.srcZ_m, minSrcZ, maxSrcZ);
+    if (std::abs(cfg.srcZ_m - srcZOld) > 1e-9) {
+        appendLog(QString("[SRC] srcZ clamped from %1 to %2")
+                  .arg(srcZOld, 0, 'f', 2)
+                  .arg(cfg.srcZ_m, 0, 'f', 2));
+        sbSrcZ_->setValue(cfg.srcZ_m);
+        syncSliceWithSourceIfNeeded();
+    }
+
+    engine_.setModel(cfg.model);
+
+    std::string err;
+    if (!engine_.initialize(g, terr, cfg, err)) {
+        errOut = QString::fromStdString(err);
+        return false;
+    }
+
+    simReady_ = true;
+    running_ = false;
+    timer_->stop();
+    nextExportT_ = 0.0;
+    frameId_ = 0;
+
+    appendLog(QString("[SIM] model=%1 | grid Nx=%2 Ny=%3 Nz=%4 | dx=%5 dy=%6 dz=%7")
+              .arg(QString::fromLatin1(simulationModelTypeName(cfg.model)))
+              .arg(g.Nx).arg(g.Ny).arg(g.Nz)
+              .arg(g.dx).arg(g.dy).arg(g.dz));
+
+    renderTerrainAndSlice();
+    return true;
+}
+
+float MainWindow::groundAtSource() const
+{
+    const ITerrain* terr = currentTerrain();
+    if (!terr || !terr->isValid()) return 0.0f;
+    return terr->height(sbSrcX_->value(), sbSrcY_->value());
+}
+
+void MainWindow::renderTerrainAndSlice()
+{
+    if (!simReady_ || !terrainPreviewReady_) {
+        renderTerrainOnly();
+        return;
+    }
+
+    const auto& g = engine_.grid();
+    const double zEff = effectiveZSlice();
+    const int k = zToK(zEff);
+
+    engine_.extractSliceXY(k, slice_, sliceMax_);
+
+    const int Nx = g.Nx;
+    const int Ny = g.Ny;
+
+    const int maxW = 950;
+    const int maxH = 650;
+    const double sx = static_cast<double>(Nx) / maxW;
+    const double sy = static_cast<double>(Ny) / maxH;
+    const double s = std::max(1.0, std::max(sx, sy));
+    const int W = std::max(1, static_cast<int>(std::round(Nx / s)));
+    const int H = std::max(1, static_cast<int>(std::round(Ny / s)));
+
+    QImage img(W, H, QImage::Format_RGB32);
+
+    const float denomH = std::max(1e-6f, tMax_ - tMin_);
+    const float maxC = std::max(1e-12f, sliceMax_);
+    const float relCut = sbDisplayCutoffRel_ ? static_cast<float>(sbDisplayCutoffRel_->value()) : 0.0f;
+    const float cCut = relCut * maxC;
+
+    const double lx = -1.0, ly = -1.0, lz = 1.0;
+    const double ln = std::sqrt(lx * lx + ly * ly + lz * lz);
+    const double Lx = lx / ln, Ly = ly / ln, Lz = lz / ln;
+
+    auto Hxy = [&](int i, int j) -> float {
+        i = std::clamp(i, 0, Nx - 1);
+        j = std::clamp(j, 0, Ny - 1);
+        return terrainXY_[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(Nx)];
+    };
+
+    const int bgMode = cbBackgroundMode_ ? cbBackgroundMode_->currentIndex() : 0;
+    const QColor kBlueBg(20, 35, 80);
+
+    for (int y = 0; y < H; ++y) {
+        const int j = std::clamp(static_cast<int>(std::round(y * s)), 0, Ny - 1);
+        for (int x = 0; x < W; ++x) {
+            const int i = std::clamp(static_cast<int>(std::round(x * s)), 0, Nx - 1);
+
+            double r = 0.0;
+            double gch = 0.0;
+            double b = 0.0;
+
+            if (bgMode == 0) {
+                const float h = Hxy(i, j);
+                const float hn = (h - tMin_) / denomH;
+
+                const float dzdx = (Hxy(i + 1, j) - Hxy(i - 1, j)) / static_cast<float>(2.0 * g.dx);
+                const float dzdy = (Hxy(i, j + 1) - Hxy(i, j - 1)) / static_cast<float>(2.0 * g.dy);
+
+                double nx = -dzdx;
+                double ny = -dzdy;
+                double nz = 1.0;
+                const double nn = std::sqrt(nx * nx + ny * ny + nz * nz);
+                nx /= nn;
+                ny /= nn;
+                nz /= nn;
+
+                const double intensity = std::max(0.0, nx * Lx + ny * Ly + nz * Lz);
+                const double shade = 0.45 + 0.55 * intensity;
+
+                int bg = static_cast<int>(std::round((40.0 + 180.0 * hn) * shade));
+                bg = std::clamp(bg, 0, 255);
+
+                r = bg;
+                gch = bg;
+                b = bg;
+            } else {
+                r = kBlueBg.red();
+                gch = kBlueBg.green();
+                b = kBlueBg.blue();
+            }
+
+            const float c = slice_[static_cast<std::size_t>(i) + static_cast<std::size_t>(j) * static_cast<std::size_t>(Nx)];
+            if (c > cCut) {
+                const float cn = std::clamp(c / maxC, 0.0f, 1.0f);
+                const QColor cc = colorMap(cn);
+                const double a = 0.15 + 0.75 * std::sqrt(cn);
+                r = (1.0 - a) * r + a * cc.red();
+                gch = (1.0 - a) * gch + a * cc.green();
+                b = (1.0 - a) * b + a * cc.blue();
+            }
+
+            img.setPixelColor(x, H - 1 - y, QColor(static_cast<int>(r), static_cast<int>(gch), static_cast<int>(b)));
+        }
+    }
+
+    static constexpr double kPad = 0.35;
+    const QColor padFill = (bgMode == 0) ? QColor(0, 0, 0) : kBlueBg;
+    const QImage canvas = applyFixedPadding(img, kPad, padFill);
+    view_->setPixmap(QPixmap::fromImage(canvas).scaled(view_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+    const auto cfg = engine_.config();
+    const QString modelName = QString::fromLatin1(simulationModelTypeName(cfg.model));
+
+    const double gsrc = static_cast<double>(groundAtSource());
+    const double zAgl = aglSliceZ();
+
+    status_->setText(
+        QString("SIM | model=%1 | t=%2 s | wind=%3 m/s @ %4 deg | leak=%5 | zEff=%6 (k=%7/%8) | sliceMax=%9 | srcZ=%10 | ground=%11 | zAGL=%12")
+            .arg(modelName)
+            .arg(engine_.time(), 0, 'f', 3)
+            .arg(engine_.currentWindSpeed(), 0, 'f', 3)
+            .arg(engine_.currentWindDirDeg(), 0, 'f', 2)
+            .arg(engine_.currentLeakRate(), 0, 'g', 6)
+            .arg(zEff, 0, 'f', 2)
+            .arg(k).arg(g.Nz - 1)
+            .arg(sliceMax_, 0, 'g', 6)
+            .arg(sbSrcZ_->value(), 0, 'f', 2)
+            .arg(gsrc, 0, 'f', 2)
+            .arg(zAgl, 0, 'f', 2));
+}
+
+void MainWindow::onSetSrcZFromGroundClicked()
+{
+    const ITerrain* terr = currentTerrain();
+    if (!terr || !terr->isValid()) {
+        appendLog("[SRC] terrain invalid.");
+        return;
+    }
+
+    const float gz = terr->height(sbSrcX_->value(), sbSrcY_->value());
+    const double agl = sbAgl_->value();
+    const double newZ = clampSliceToFluid(gz + agl);
+    sbSrcZ_->setValue(newZ);
+    syncSliceWithSourceIfNeeded();
+
+    appendLog(QString("[SRC] srcZ = clamp(ground(%1)+AGL(%2)) => %3")
+              .arg(gz, 0, 'f', 2)
+              .arg(agl, 0, 'f', 2)
+              .arg(newZ, 0, 'f', 2));
+}
+
+void MainWindow::onRunClicked()
+{
+    syncSliceWithSourceIfNeeded();
+
+    if (!simReady_) {
+        QString err;
+        if (!buildSimulation(err)) {
+            appendLog("[Run] buildSimulation failed: " + err);
+            return;
+        }
+    }
+
+    running_ = true;
+    timer_->start();
+    appendLog("[Run] start.");
+}
+
+void MainWindow::onPauseClicked()
+{
+    running_ = false;
+    timer_->stop();
+    appendLog("[Pause] stopped.");
+}
+
+void MainWindow::onResetClicked()
+{
+    running_ = false;
+    timer_->stop();
+    if (simReady_) {
+        engine_.reset();
+    }
+    simReady_ = false;
+    appendLog("[Reset] done.");
+    renderTerrainOnly();
+}
+
+void MainWindow::onTick()
+{
+    if (!running_ || !simReady_) return;
+
+    engine_.step();
+
+    const auto p = engine_.config();
+    if (engine_.time() >= p.totalTime_s - 1e-12) {
+        running_ = false;
+        timer_->stop();
+        appendLog("[Run] finished.");
+        renderTerrainAndSlice();
+        return;
+    }
+
+    if (cbExportCsv_->isChecked()) {
+        const double t = engine_.time();
+        if (t >= nextExportT_ - 1e-12) {
+            QDir().mkpath(framesDir());
+
+            const auto& g = engine_.grid();
+
+            auto writeSlice = [&](const QString& suffix, double zWorld) {
+                const int k = zToK(zWorld);
+                std::vector<float> grid2d;
+                float mx = 0.0f;
+                engine_.extractSliceXY(k, grid2d, mx);
+
+                ExporterCsv::Meta meta;
+                meta.epsg = 0;
+                meta.origin_x = g.x0;
+                meta.origin_y = g.y0;
+                meta.dx = g.dx;
+                meta.dy = g.dy;
+                meta.z = g.z(k);
+                meta.t = t;
+
+                const QString f = QDir(framesDir()).filePath(
+                    QString("frame_%1_%2.csv").arg(frameId_, 4, 10, QLatin1Char('0')).arg(suffix));
+
+                std::string err;
+                if (!ExporterCsv::writeGridFrame(
+                        f.toStdString(),
+                        meta,
+                        g.Nx,
+                        g.Ny,
+                        grid2d,
+                        err)) {
+                    appendLog("[CSV] write failed: " + QString::fromStdString(err));
+                } else {
+                    appendLog("[CSV] wrote: " + f);
+                }
+            };
+
+            auto writeColumn = [&]() {
+                std::vector<float> grid2d;
+                float mx = 0.0f;
+                engine_.extractColumnIntegralXY(grid2d, mx);
+
+                ExporterCsv::Meta meta;
+                meta.epsg = 0;
+                meta.origin_x = g.x0;
+                meta.origin_y = g.y0;
+                meta.dx = g.dx;
+                meta.dy = g.dy;
+                meta.z = 0;
+                meta.t = t;
+                meta.product = "column_integral";
+                meta.quantity = "kg/m^2";
+
+                const QString f = QDir(framesDir()).filePath(
+                    QString("frame_%1_column.csv").arg(frameId_, 4, 10, QLatin1Char('0')));
+
+                std::string err;
+                if (!ExporterCsv::writeGridFrame(
+                        f.toStdString(),
+                        meta,
+                        g.Nx,
+                        g.Ny,
+                        grid2d,
+                        err)) {
+                    appendLog("[CSV] write failed: " + QString::fromStdString(err));
+                } else {
+                    appendLog("[CSV] wrote: " + f);
+                }
+            };
+
+            writeSlice("zslice", effectiveZSlice());
+            if (cbExportTwoSlices_->isChecked()) {
+                writeSlice("agl", aglSliceZ());
+            }
+            if (cbExportColumn_->isChecked()) {
+                writeColumn();
+            }
+
+            frameId_++;
+            nextExportT_ += sbExportInterval_->value();
+        }
+    }
+
+    renderTerrainAndSlice();
+}
+</file>
+
+<file path="MainWindow.h">
+#pragma once
+#include <QtWidgets/QMainWindow>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QSpinBox>
+#include <QtWidgets/QCheckBox>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QPlainTextEdit>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QComboBox>
+#include <QtWidgets/QScrollArea>
+#include <QTimer>
+
+#include <vector>
+
+#include "TerrainDem.h"
+#include "TerrainFlat.h"
+#include "TerrainProcedural.h"
+#include "PlumeEngine.h"
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget* parent = nullptr);
+
+private slots:
+    void onPickDemClicked();
+    void onConvertLoadDemClicked();
+    void onTerrainParamsChanged();
+    void onPreviewTerrainClicked();
+
+    void onSetSrcZFromGroundClicked();
+    void onRunClicked();
+    void onPauseClicked();
+    void onResetClicked();
+    void onTick();
+
+    void onFollowSliceToggled(bool on);
+
+private:
+    enum class TerrainMode { Flat = 0, Dem = 1, Procedural = 2 };
+
+    QLabel* view_{nullptr};
+    QLabel* status_{nullptr};
+
+    QScrollArea* leftScroll_{nullptr};
+
+    QComboBox* cbTerrainMode_{nullptr};
+
+    QLineEdit* leDemTif_{nullptr};
+    QPushButton* btnPickDem_{nullptr};
+    QPushButton* btnConvertLoadDem_{nullptr};
+    QSpinBox* sbDemStride_{nullptr};
+    QLabel* demInfo_{nullptr};
+
+    QDoubleSpinBox* sbFlatZ_{nullptr};
+
+    QDoubleSpinBox* sbProcBaseZ_{nullptr};
+    QDoubleSpinBox* sbProcPeakA_{nullptr};
+    QDoubleSpinBox* sbProcSigma_{nullptr};
+
+    QPushButton* btnPreviewTerrain_{nullptr};
+
+    QDoubleSpinBox* sbX0_{nullptr};
+    QDoubleSpinBox* sbY0_{nullptr};
+    QDoubleSpinBox* sbLx_{nullptr};
+    QDoubleSpinBox* sbLy_{nullptr};
+    QDoubleSpinBox* sbDx_{nullptr};
+    QDoubleSpinBox* sbDy_{nullptr};
+    QLabel* domainInfo_{nullptr};
+
+    QDoubleSpinBox* sbDz_{nullptr};
+    QDoubleSpinBox* sbZTopMargin_{nullptr};
+    QSpinBox* sbNzMax_{nullptr};
+    QDoubleSpinBox* sbZSlice_{nullptr};
+    QCheckBox* cbFollowSlice_{nullptr};
+
+    QComboBox* cbModel_{nullptr};
+    QDoubleSpinBox* sbWindSpeed_{nullptr};
+    QDoubleSpinBox* sbWindDir_{nullptr};
+    QDoubleSpinBox* sbK_{nullptr};
+    QDoubleSpinBox* sbDecay_{nullptr};
+
+    QDoubleSpinBox* sbTotalTime_{nullptr};
+    QDoubleSpinBox* sbDt_{nullptr};
+    QCheckBox* cbAutoClampDt_{nullptr};
+    QCheckBox* cbExportCsv_{nullptr};
+    QDoubleSpinBox* sbExportInterval_{nullptr};
+    QCheckBox* cbExportTwoSlices_{nullptr};
+    QCheckBox* cbExportColumn_{nullptr};
+
+    QDoubleSpinBox* sbSrcX_{nullptr};
+    QDoubleSpinBox* sbSrcY_{nullptr};
+    QDoubleSpinBox* sbSrcZ_{nullptr};
+    QDoubleSpinBox* sbSrcRadius_{nullptr};
+    QDoubleSpinBox* sbLeak_{nullptr};
+    QDoubleSpinBox* sbAgl_{nullptr};
+    QPushButton* btnSetSrcZFromGround_{nullptr};
+    QCheckBox* cbAutoCenterSrc_{nullptr};
+
+    QComboBox* cbBackgroundMode_{nullptr};
+    QDoubleSpinBox* sbDisplayCutoffRel_{nullptr};
+
+    QPushButton* btnRun_{nullptr};
+    QPushButton* btnPause_{nullptr};
+    QPushButton* btnReset_{nullptr};
+    QPlainTextEdit* log_{nullptr};
+
+    TerrainDem dem_;
+    bool hasDem_{false};
+
+    TerrainFlat flat_{};
+    TerrainProcedural proc_{};
+
+    bool terrainPreviewReady_{false};
+    int tNx_{0}, tNy_{0};
+    double tx0_{0.0}, ty0_{0.0}, tdx_{1.0}, tdy_{1.0};
+    float tMin_{0.0f}, tMax_{0.0f};
+    std::vector<float> terrainXY_;
+
+    PlumeEngine engine_;
+    bool simReady_{false};
+    QTimer* timer_{nullptr};
+    bool running_{false};
+
+    double nextExportT_{0.0};
+    int frameId_{0};
+
+    std::vector<float> slice_;
+    float sliceMax_{0.0f};
+
+    void appendLog(const QString& s);
+    QString framesDir() const;
+
+    TerrainMode terrainMode() const;
+    const ITerrain* currentTerrain() const;
+
+    void updateDomainInfo();
+    bool buildTerrainPreview(QString& errOut);
+    void renderTerrainOnly();
+    void renderTerrainAndSlice();
+
+    bool buildSimulation(QString& errOut);
+    SimulationConfig readSimConfig() const;
+
+    float groundAtSource() const;
+    double clampSliceToFluid(double z) const;
+    double effectiveZSlice() const;
+    double aglSliceZ() const;
+    int zToK(double z) const;
+    void syncSliceWithSourceIfNeeded();
+    void enforceSourceCenterIfNeeded();
+};
+</file>
+
+<file path="PlumeEngine.cpp">
+#include "PlumeEngine.h"
+
+#include <chrono>
+
+#include "GaussianPlumeModel.h"
+#include "GaussianPuffModel.h"
+#include "Simulator3D.h"
+
+PlumeEngine::PlumeEngine() = default;
+PlumeEngine::~PlumeEngine() = default;
+
+void PlumeEngine::resetSolveStats()
+{
+    lastSolveMs_ = 0.0;
+    totalSolveMs_ = 0.0;
+    solveStepCount_ = 0;
+}
+
+void PlumeEngine::setModel(SimulationModelType t)
+{
+    modelType_ = t;
+}
+
+SimulationModelType PlumeEngine::model() const
+{
+    return modelType_;
+}
+
+bool PlumeEngine::initialize(const Grid3D& g, const ITerrain* terr, const SimulationConfig& p, std::string& err)
+{
+    grid_ = g;
+    terr_ = terr;
+    config_ = p;
+    resetSolveStats();
+
+    switch (modelType_) {
+    case SimulationModelType::CfdEulerian:
+        model_ = std::make_unique<Simulator3D>();
+        break;
+    case SimulationModelType::GaussianPlume:
+        model_ = std::make_unique<GaussianPlumeModel>();
+        break;
+    case SimulationModelType::GaussianPuff:
+        model_ = std::make_unique<GaussianPuffModel>();
+        break;
+    default:
+        err = "PlumeEngine: unknown model type.";
+        return false;
+    }
+
+    return model_->initialize(grid_, terr_, config_, err);
+}
+
+void PlumeEngine::reset()
+{
+    if (model_) model_->reset();
+    resetSolveStats();
+}
+
+double PlumeEngine::step()
+{
+    if (!model_) return 0.0;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const double out = model_->step();
+    const auto t1 = std::chrono::steady_clock::now();
+
+    lastSolveMs_ = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    totalSolveMs_ += lastSolveMs_;
+    ++solveStepCount_;
+
+    return out;
+}
+
+double PlumeEngine::time() const
+{
+    return model_ ? model_->time() : 0.0;
+}
+
+const Grid3D& PlumeEngine::grid() const
+{
+    return model_ ? model_->grid() : grid_;
+}
+
+SimulationConfig PlumeEngine::config() const
+{
+    return model_ ? model_->config() : config_;
+}
+
+double PlumeEngine::currentWindSpeed() const
+{
+    return model_ ? model_->currentWindSpeed() : 0.0;
+}
+
+double PlumeEngine::currentWindDirDeg() const
+{
+    return model_ ? model_->currentWindDirDeg() : 0.0;
+}
+
+double PlumeEngine::currentLeakRate() const
+{
+    return model_ ? model_->currentLeakRate() : 0.0;
+}
+
+void PlumeEngine::extractSliceXY(int k, std::vector<float>& out, float& maxC) const
+{
+    if (model_) {
+        model_->extractSliceXY(k, out, maxC);
+    } else {
+        out.clear();
+        maxC = 0.0f;
+    }
+}
+
+void PlumeEngine::extractColumnIntegralXY(std::vector<float>& out, float& maxC) const
+{
+    if (model_) {
+        model_->extractColumnIntegralXY(out, maxC);
+    } else {
+        out.clear();
+        maxC = 0.0f;
+    }
+}
+</file>
+
+<file path="PlumeEngine.h">
+#pragma once
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include "Grid3D.h"
+#include "ISimulationModel.h"
+#include "ITerrain.h"
+#include "SimulationConfig.h"
+
+class PlumeEngine
+{
+public:
+    PlumeEngine();
+    ~PlumeEngine();
+
+    void setModel(SimulationModelType t);
+    SimulationModelType model() const;
+
+    bool initialize(const Grid3D& g, const ITerrain* terr, const SimulationConfig& p, std::string& err);
+    void reset();
+    double step();
+
+    double time() const;
+    const Grid3D& grid() const;
+    SimulationConfig config() const;
+
+    double currentWindSpeed() const;
+    double currentWindDirDeg() const;
+    double currentLeakRate() const;
+
+    void extractSliceXY(int k, std::vector<float>& out, float& maxC) const;
+    void extractColumnIntegralXY(std::vector<float>& out, float& maxC) const;
+
+    double lastSolveMs() const { return lastSolveMs_; }
+    double totalSolveMs() const { return totalSolveMs_; }
+    std::uint64_t solveStepCount() const { return solveStepCount_; }
+    double averageSolveMs() const
+    {
+        return solveStepCount_ > 0 ? totalSolveMs_ / static_cast<double>(solveStepCount_) : 0.0;
+    }
+
+private:
+    void resetSolveStats();
+
+private:
+    Grid3D grid_;
+    const ITerrain* terr_ = nullptr;
+    SimulationConfig config_;
+
+    std::unique_ptr<ISimulationModel> model_;
+    SimulationModelType modelType_ = SimulationModelType::CfdEulerian;
+
+    double lastSolveMs_ = 0.0;
+    double totalSolveMs_ = 0.0;
+    std::uint64_t solveStepCount_ = 0;
+};
+</file>
+
+<file path="SimulationConfig.h">
+#pragma once
+
+enum class SimulationModelType
+{
+    CfdEulerian = 0,
+    GaussianPlume = 1,
+    GaussianPuff = 2
+};
+
+inline const char* simulationModelTypeName(SimulationModelType t)
+{
+    switch (t) {
+    case SimulationModelType::CfdEulerian:
+        return "Terrain-aware Eulerian";
+    case SimulationModelType::GaussianPlume:
+        return "Terrain-aware Gaussian plume";
+    case SimulationModelType::GaussianPuff:
+        return "Terrain-aware Gaussian puff";
+    default:
+        return "Unknown";
+    }
+}
+
+struct SimulationStochasticConfig
+{
+    bool enabled = true;
+    unsigned int seed = 42;
+    double updateEvery_s = 1.0;
+    double windSpeedSigma_mps = 0.30;
+    double windDirSigma_deg = 7.0;
+    double leakRelSigma = 0.10;
+};
+
+struct SimulationConfig
+{
+    SimulationModelType model = SimulationModelType::CfdEulerian;
+
+    double totalTime_s = 60.0;
+    double dt_s = 0.05;
+    bool autoClampDt = true;
+
+    double windSpeed_mps = 2.0;
+    double windDir_deg = 0.0;
+
+    double K_m2ps = 1.0;
+    double decay_1ps = 0.0;
+
+    double srcX_m = 0.0;
+    double srcY_m = 0.0;
+    double srcZ_m = 2.0;
+    double srcRadius_m = 2.0;
+    double leakRate_kgps = 1.0;
+
+    double releaseInterval_s = 0.0;
+
+    SimulationStochasticConfig noise;
+};
+</file>
+
+<file path="Simulator3D.cpp">
+#include "Simulator3D.h"
+
+#include <algorithm>
+
+bool Simulator3D::initialize(
+    const Grid3D& grid,
+    const ITerrain* terrain,
+    const SimulationConfig& config,
+    std::string& err)
+{
+    err.clear();
+    grid_ = grid;
+    terrainRaw_ = terrain;
+    config_ = config;
+    config_.model = SimulationModelType::CfdEulerian;
+    t_ = 0.0;
+    maxC_ = 0.0f;
+
+    try {
+        grid_.validate();
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+
+    if (!terrainRaw_) {
+        err = "Simulator3D: terrain is null.";
+        return false;
+    }
+    if (!terrainRaw_->isValid()) {
+        err = "Simulator3D: terrain invalid.";
+        return false;
+    }
+
+    if (!terrainSampler_.initialize(grid_, terrainRaw_, err)) {
+        return false;
+    }
+
+    const double groundAtSource = terrainSampler_.heightBilinear(config_.srcX_m, config_.srcY_m);
+    if (config_.srcZ_m <= groundAtSource + 1.0e-6) {
+        err = "Simulator3D: source Z is below or at terrain.";
+        return false;
+    }
+
+    TerrainAwareWindField::Params windParams;
+    windParams.baseSpeed_mps = config_.windSpeed_mps;
+    windParams.baseDir_deg = config_.windDir_deg;
+    windParams.noise.enabled = config_.noise.enabled;
+    windParams.noise.seed = config_.noise.seed;
+    windParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    windParams.noise.windSpeedSigma_mps = config_.noise.windSpeedSigma_mps;
+    windParams.noise.windDirSigma_deg = config_.noise.windDirSigma_deg;
+    windField_.setParams(windParams);
+
+    if (!windField_.initialize(grid_, &terrainSampler_, err)) {
+        return false;
+    }
+
+    LeakSourceController::Params leakParams;
+    leakParams.baseLeakRate = config_.leakRate_kgps;
+    leakParams.noise.enabled = config_.noise.enabled;
+    leakParams.noise.seed = config_.noise.seed + 7919U;
+    leakParams.noise.updateEvery_s = config_.noise.updateEvery_s;
+    leakParams.noise.leakRelSigma = config_.noise.leakRelSigma;
+    sourceController_.setParams(leakParams);
+    sourceController_.initialize();
+
+    EulerianSolver3D::Params solverParams;
+    solverParams.K_m2ps = config_.K_m2ps;
+    solverParams.decay_1ps = config_.decay_1ps;
+    solverParams.srcX_m = config_.srcX_m;
+    solverParams.srcY_m = config_.srcY_m;
+    solverParams.srcZ_m = config_.srcZ_m;
+    solverParams.srcRadius_m = config_.srcRadius_m;
+
+    if (!solver_.initialize(grid_, &terrainSampler_, solverParams, err)) {
+        return false;
+    }
+
+    return true;
+}
+
+void Simulator3D::reset()
+{
+    t_ = 0.0;
+    maxC_ = 0.0f;
+    windField_.reset();
+    sourceController_.reset();
+    solver_.reset();
+}
+
+double Simulator3D::stableDt() const
+{
+    return solver_.stableDt(windField_.representativeSpeed());
+}
+
+double Simulator3D::step()
+{
+    if (t_ >= config_.totalTime_s - 1.0e-12) {
+        return t_;
+    }
+
+    double dt = std::max(1.0e-9, config_.dt_s);
+    if (config_.autoClampDt) {
+        const double dtStable = stableDt();
+        if (dtStable > 0.0) {
+            dt = std::min(dt, dtStable);
+        }
+    }
+
+    dt = std::min(dt, config_.totalTime_s - t_);
+    dt = std::max(1.0e-9, dt);
+
+    windField_.advance(dt);
+    sourceController_.advance(dt);
+    solver_.step(dt, windField_, sourceController_.currentLeakRate());
+
+    t_ += dt;
+    maxC_ = solver_.maxC();
+    return t_;
+}
+
+void Simulator3D::extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const
+{
+    solver_.extractSliceXY(zIndex, outSlice, outMax);
+}
+
+void Simulator3D::extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const
+{
+    solver_.extractColumnIntegralXY(outGrid, outMax);
+}
+</file>
+
+<file path="Simulator3D.h">
+#pragma once
+#include "ISimulationModel.h"
+#include "EulerianSolver3D.h"
+#include "LeakSourceController.h"
+#include "TerrainSampler.h"
+#include "WindField.h"
+
+class Simulator3D final : public ISimulationModel
+{
+public:
+    Simulator3D() = default;
+
+    SimulationModelType modelType() const override
+    {
+        return SimulationModelType::CfdEulerian;
+    }
+
+    bool initialize(
+        const Grid3D& grid,
+        const ITerrain* terrain,
+        const SimulationConfig& config,
+        std::string& err) override;
+
+    void reset() override;
+    double step() override;
+    double stableDt() const override;
+
+    double time() const override { return t_; }
+    float maxC() const override { return maxC_; }
+
+    const Grid3D& grid() const override { return grid_; }
+    const SimulationConfig& config() const override { return config_; }
+
+    double currentWindSpeed() const override { return windField_.representativeSpeed(); }
+    double currentWindDirDeg() const override { return windField_.currentDirectionDeg(); }
+    double currentLeakRate() const override { return sourceController_.currentLeakRate(); }
+
+    void extractSliceXY(int zIndex, std::vector<float>& outSlice, float& outMax) const override;
+    void extractColumnIntegralXY(std::vector<float>& outGrid, float& outMax) const override;
+
+private:
+    Grid3D grid_{};
+    const ITerrain* terrainRaw_{nullptr};
+    SimulationConfig config_{};
+
+    double t_{0.0};
+    float maxC_{0.0f};
+
+    TerrainSampler terrainSampler_{};
+    TerrainAwareWindField windField_{};
+    LeakSourceController sourceController_{};
+    EulerianSolver3D solver_{};
+};
+</file>
+
+<file path="TerrainDem.cpp">
+#include "TerrainDem.h"
+
+#include <QByteArray>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QString>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <string>
+
+namespace {
+
+static bool readAllBytes(const QString& path, QByteArray& out, QString& err)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        err = "Cannot open: " + path;
+        return false;
+    }
+    out = f.readAll();
+    return true;
+}
+
+} // namespace
+
+bool TerrainDem::load(const std::string& metaPath, const std::string& binPath)
+{
+    valid_ = false;
+    w_ = 0;
+    h_ = 0;
+    xMin_ = 0.0;
+    yMin_ = 0.0;
+    xMax_ = 0.0;
+    yMax_ = 0.0;
+    dx_ = 1.0;
+    dy_ = 1.0;
+    data_.clear();
+
+    QString errOut;
+    const QString metaPathQ = QString::fromStdString(metaPath);
+    const QString binPathQ = QString::fromStdString(binPath);
+
+    QByteArray metaBytes;
+    if (!readAllBytes(metaPathQ, metaBytes, errOut)) {
+        return false;
+    }
+
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(metaBytes, &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
+        return false;
+    }
+
+    const QJsonObject o = doc.object();
+
+    auto getInt = [&](const char* k, int& v) -> bool {
+        if (!o.contains(k) || !o.value(k).isDouble()) return false;
+        v = o.value(k).toInt();
+        return true;
+    };
+
+    auto getDouble = [&](const char* k, double& v) -> bool {
+        if (!o.contains(k) || !o.value(k).isDouble()) return false;
+        v = o.value(k).toDouble();
+        return true;
+    };
+
+    int width = 0;
+    int height = 0;
+    double originX = 0.0;
+    double originY = 0.0;
+    double ddx = 0.0;
+    double ddy = 0.0;
+    int epsg = 0;
+
+    if (!getInt("width", width) || !getInt("height", height)) {
+        return false;
+    }
+    if (!getDouble("origin_x", originX) || !getDouble("origin_y", originY)) {
+        return false;
+    }
+    if (!getDouble("dx", ddx) || !getDouble("dy", ddy)) {
+        return false;
+    }
+    if (o.contains("epsg") && o.value("epsg").isDouble()) {
+        epsg = o.value("epsg").toInt();
+    }
+
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (std::abs(ddx) < 1e-12 || std::abs(ddy) < 1e-12) {
+        return false;
+    }
+    if (epsg == 0) {
+        return false;
+    }
+
+    QByteArray binBytes;
+    if (!readAllBytes(binPathQ, binBytes, errOut)) {
+        return false;
+    }
+
+    const std::size_t n =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::size_t expectedBytes = n * sizeof(float);
+
+    if (static_cast<std::size_t>(binBytes.size()) != expectedBytes) {
+        return false;
+    }
+
+    data_.resize(n);
+    std::memcpy(data_.data(), binBytes.constData(), expectedBytes);
+
+    w_ = width;
+    h_ = height;
+    dx_ = ddx;
+    dy_ = ddy;
+    xMin_ = originX;
+    yMin_ = originY;
+    xMax_ = originX + (static_cast<double>(w_ - 1) * dx_);
+    yMax_ = originY + (static_cast<double>(h_ - 1) * dy_);
+
+    valid_ = true;
+    return true;
+}
+
+float TerrainDem::at(int i, int j) const
+{
+    if (w_ <= 0 || h_ <= 0 || data_.empty()) {
+        return 0.0f;
+    }
+
+    i = std::clamp(i, 0, w_ - 1);
+    j = std::clamp(j, 0, h_ - 1);
+
+    return data_[static_cast<std::size_t>(i) +
+                 static_cast<std::size_t>(j) * static_cast<std::size_t>(w_)];
+}
+
+float TerrainDem::sampleBilinear(double x, double y) const
+{
+    if (!valid_ || data_.empty() || w_ <= 0 || h_ <= 0) {
+        return 0.0f;
+    }
+
+    if (w_ == 1 && h_ == 1) {
+        return data_[0];
+    }
+
+    const double fx = (x - xMin_) / dx_;
+    const double fy = (y - yMin_) / dy_;
+
+    const double fxC = std::clamp(fx, 0.0, static_cast<double>(w_ - 1));
+    const double fyC = std::clamp(fy, 0.0, static_cast<double>(h_ - 1));
+
+    const int x0 = static_cast<int>(std::floor(fxC));
+    const int y0 = static_cast<int>(std::floor(fyC));
+    const int x1 = std::min(x0 + 1, w_ - 1);
+    const int y1 = std::min(y0 + 1, h_ - 1);
+
+    const double tx = fxC - static_cast<double>(x0);
+    const double ty = fyC - static_cast<double>(y0);
+
+    const float q00 = at(x0, y0);
+    const float q10 = at(x1, y0);
+    const float q01 = at(x0, y1);
+    const float q11 = at(x1, y1);
+
+    const double v0 = static_cast<double>(q00) * (1.0 - tx) + static_cast<double>(q10) * tx;
+    const double v1 = static_cast<double>(q01) * (1.0 - tx) + static_cast<double>(q11) * tx;
+
+    return static_cast<float>(v0 * (1.0 - ty) + v1 * ty);
+}
+
+double TerrainDem::minElevation() const
+{
+    if (data_.empty()) return 0.0;
+
+    float minVal = data_[0];
+    for (float v : data_) {
+        if (v < minVal) {
+            minVal = v;
+        }
+    }
+    return static_cast<double>(minVal);
+}
+
+float TerrainDem::height(double x, double y) const
+{
+    if (!valid_) return 0.0f;
+    return sampleBilinear(x, y);
+}
+</file>
+
+<file path="TerrainDem.h">
+#pragma once
+#include <algorithm>
+#include <string>
+#include <vector>
+
+#include "ITerrain.h"
+
+class TerrainDem : public ITerrain
+{
+public:
+    bool load(const std::string& metaPath, const std::string& binPath);
+
+    float height(double x, double y) const override;
+    bool isValid() const override { return valid_; }
+
+    int width() const { return w_; }
+    int height() const { return h_; }
+
+    double xMin() const { return xMin_; }
+    double yMin() const { return yMin_; }
+    double xMax() const { return xMax_; }
+    double yMax() const { return yMax_; }
+
+    double dx() const { return dx_; }
+    double dy() const { return dy_; }
+    double cellSize() const { return std::max(std::abs(dx_), std::abs(dy_)); }
+
+    double centerX() const { return 0.5 * (xMin_ + xMax_); }
+    double centerY() const { return 0.5 * (yMin_ + yMax_); }
+
+    double minX() const { return xMin_; }
+    double minY() const { return yMin_; }
+
+    double minElevation() const;
+
+    int nx() const { return w_; }
+    int ny() const { return h_; }
+
+private:
+    float at(int i, int j) const;
+    float sampleBilinear(double x, double y) const;
+
+private:
+    bool valid_ = false;
+    int w_ = 0;
+    int h_ = 0;
+
+    double xMin_ = 0.0;
+    double yMin_ = 0.0;
+    double xMax_ = 0.0;
+    double yMax_ = 0.0;
+    double dx_ = 1.0;
+    double dy_ = 1.0;
+
+    std::vector<float> data_;
+};
+</file>
+
+<file path="TerrainFlat.h">
+#pragma once
+#include "ITerrain.h"
+
+struct TerrainFlat : public ITerrain
+{
+    float z = 0.0f;
+    float height(double, double) const override { return z; }
+};
+</file>
+
+<file path="TerrainProcedural.h">
+#pragma once
+#include "ITerrain.h"
+
+#include <cmath>
+
+class TerrainProcedural : public ITerrain
+{
+public:
+    enum class Mode
+    {
+        Flat,
+        GaussianHill,
+        Sombrero
+    };
+
+    struct Gaussian
+    {
+        double xc = 0.0;
+        double yc = 0.0;
+        double A = 80.0;
+        double sigma = 50.0;
+    };
+
+    void setMode(Mode m) { mode_ = m; }
+    void setBaseZ(float z) { baseZ_ = z; }
+    void setGaussian(const Gaussian &g) { gaussian_ = g; }
+
+    void setGaussianHill(double baseZ, double peakA, double sigma)
+    {
+        mode_ = Mode::GaussianHill;
+        baseZ_ = baseZ;
+        gaussian_.A = peakA;
+        gaussian_.sigma = sigma;
+    }
+
+    void setSombrero(double baseZ, double amplitude, double radius)
+    {
+        mode_ = Mode::Sombrero;
+        baseZ_ = baseZ;
+        sombreroAmp_ = amplitude;
+        sombreroR_ = radius;
+    }
+
+    float height(double x, double y) const override
+    {
+        if (mode_ == Mode::Flat)
+        {
+            return baseZ_;
+        }
+
+        if (mode_ == Mode::GaussianHill)
+        {
+            const double dx = x - gaussian_.xc;
+            const double dy = y - gaussian_.yc;
+            const double r2 = dx * dx + dy * dy;
+            const double s2 = gaussian_.sigma * gaussian_.sigma;
+            const double h = baseZ_ + gaussian_.A * std::exp(-0.5 * r2 / std::max(1e-12, s2));
+            return (float)h;
+        }
+
+        if (mode_ == Mode::Sombrero)
+        {
+            const double dx = x - gaussian_.xc;
+            const double dy = y - gaussian_.yc;
+            const double r = std::sqrt(dx * dx + dy * dy);
+            const double r0 = sombreroR_;
+            const double xsi = r / r0;
+            const double h = baseZ_ + sombreroAmp_ * ((1.0 - xsi) * (1.0 + xsi) * (1.0 - xsi) * (1.0 + xsi));
+            return (float)h;
+        }
+
+        return baseZ_;
+    }
+
+private:
+    Mode mode_ = Mode::Flat;
+    float baseZ_ = 0.0f;
+    Gaussian gaussian_{0.0, 0.0, 80.0, 50.0};
+    double sombreroAmp_ = 80.0;
+    double sombreroR_ = 50.0;
+};
+</file>
+
+<file path="TerrainSampler.h">
+#pragma once
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <vector>
+
+#include "Grid3D.h"
+#include "ITerrain.h"
+
+class TerrainSampler final
+{
+public:
+    TerrainSampler() = default;
+
+    bool initialize(const Grid3D& grid, const ITerrain* terrain, std::string& err)
+    {
+        err.clear();
+        grid_ = grid;
+        terrain_ = terrain;
+
+        if (!terrain_) {
+            err = "TerrainSampler: terrain is null.";
+            return false;
+        }
+
+        try {
+            grid_.validate();
+        } catch (const std::exception& e) {
+            err = e.what();
+            return false;
+        }
+
+        H_.assign(static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(grid_.Ny), 0.0f);
+        for (int j = 0; j < grid_.Ny; ++j) {
+            const double y = grid_.y(j);
+            for (int i = 0; i < grid_.Nx; ++i) {
+                const double x = grid_.x(i);
+                H_[gridIndex(i, j)] = terrain_->height(x, y);
+            }
+        }
+        return true;
+    }
+
+    void clear()
+    {
+        terrain_ = nullptr;
+        H_.clear();
+        grid_ = Grid3D{};
+    }
+
+    bool isValid() const
+    {
+        return terrain_ != nullptr && !H_.empty();
+    }
+
+    const Grid3D& grid() const
+    {
+        return grid_;
+    }
+
+    double heightAtNode(int i, int j) const
+    {
+        if (!isValid()) return 0.0;
+        i = std::clamp(i, 0, grid_.Nx - 1);
+        j = std::clamp(j, 0, grid_.Ny - 1);
+        return H_[gridIndex(i, j)];
+    }
+
+    double heightBilinear(double x, double y) const
+    {
+        if (!isValid()) return 0.0;
+        if (grid_.Nx <= 1 || grid_.Ny <= 1) {
+            return terrain_->height(x, y);
+        }
+
+        const double fx = (x - grid_.x0) / grid_.dx;
+        const double fy = (y - grid_.y0) / grid_.dy;
+
+        int i0 = static_cast<int>(std::floor(fx));
+        int j0 = static_cast<int>(std::floor(fy));
+        double tx = fx - static_cast<double>(i0);
+        double ty = fy - static_cast<double>(j0);
+
+        i0 = std::clamp(i0, 0, grid_.Nx - 2);
+        j0 = std::clamp(j0, 0, grid_.Ny - 2);
+        tx = std::clamp(tx, 0.0, 1.0);
+        ty = std::clamp(ty, 0.0, 1.0);
+
+        const int i1 = i0 + 1;
+        const int j1 = j0 + 1;
+
+        const double h00 = H_[gridIndex(i0, j0)];
+        const double h10 = H_[gridIndex(i1, j0)];
+        const double h01 = H_[gridIndex(i0, j1)];
+        const double h11 = H_[gridIndex(i1, j1)];
+
+        const double hx0 = h00 * (1.0 - tx) + h10 * tx;
+        const double hx1 = h01 * (1.0 - tx) + h11 * tx;
+        return hx0 * (1.0 - ty) + hx1 * ty;
+    }
+
+    void gradient(double x, double y, double& dzdx, double& dzdy) const
+    {
+        if (!isValid()) {
+            dzdx = 0.0;
+            dzdy = 0.0;
+            return;
+        }
+
+        const double h = std::max(grid_.dx, grid_.dy);
+        const double hx1 = heightBilinear(x + h, y);
+        const double hx0 = heightBilinear(x - h, y);
+        const double hy1 = heightBilinear(x, y + h);
+        const double hy0 = heightBilinear(x, y - h);
+
+        dzdx = (hx1 - hx0) / (2.0 * h);
+        dzdy = (hy1 - hy0) / (2.0 * h);
+    }
+
+    double maxHeightAlongRay(double x0, double y0, double x1, double y1, int samples = 16) const
+    {
+        if (!isValid()) return 0.0;
+
+        samples = std::max(2, samples);
+        double hMax = -1.0e30;
+        for (int s = 0; s < samples; ++s) {
+            const double t = static_cast<double>(s) / static_cast<double>(samples - 1);
+            const double x = x0 * (1.0 - t) + x1 * t;
+            const double y = y0 * (1.0 - t) + y1 * t;
+            hMax = std::max(hMax, heightBilinear(x, y));
+        }
+        return hMax;
+    }
+
+private:
+    std::size_t gridIndex(int i, int j) const
+    {
+        return static_cast<std::size_t>(i)
+             + static_cast<std::size_t>(grid_.Nx) * static_cast<std::size_t>(j);
+    }
+
+private:
+    Grid3D grid_{};
+    const ITerrain* terrain_{nullptr};
+    std::vector<float> H_;
+};
+</file>
+
+<file path="WindField.cpp">
+#include "WindField.h"
+
+double TerrainAwareWindField::deg2rad(double d)
+{
+    constexpr double kPi = 3.1415926535897932384626433832795;
+    return d * kPi / 180.0;
+}
+
+double TerrainAwareWindField::rad2deg(double r)
+{
+    constexpr double kPi = 3.1415926535897932384626433832795;
+    return r * 180.0 / kPi;
+}
+
+double TerrainAwareWindField::wrapAngleDeg(double a)
+{
+    while (a >= 180.0) a -= 360.0;
+    while (a < -180.0) a += 360.0;
+    return a;
+}
+
+bool TerrainAwareWindField::initialize(const Grid3D& grid, const TerrainSampler* terrain, std::string& err)
+{
+    err.clear();
+    grid_ = grid;
+    terrain_ = terrain;
+
+    if (!terrain_) {
+        err = "TerrainAwareWindField: terrain sampler is null.";
+        return false;
+    }
+
+    t_ = 0.0;
+    rng_ = std::mt19937(params_.noise.seed);
+    nextNoiseUpdateT_ = 0.0;
+    refreshNoise();
+    return true;
+}
+
+void TerrainAwareWindField::reset()
+{
+    t_ = 0.0;
+    rng_ = std::mt19937(params_.noise.seed);
+    nextNoiseUpdateT_ = 0.0;
+    refreshNoise();
+}
+
+void TerrainAwareWindField::advance(double dt)
+{
+    t_ += std::max(0.0, dt);
+    if (!params_.noise.enabled) {
+        return;
+    }
+
+    if (t_ + 1.0e-12 >= nextNoiseUpdateT_) {
+        refreshNoise();
+    }
+}
+
+void TerrainAwareWindField::setDirectionFromDeg(double deg)
+{
+    effDir_deg_ = wrapAngleDeg(deg);
+    const double th = deg2rad(effDir_deg_);
+    dirX_ = std::cos(th);
+    dirY_ = std::sin(th);
+}
+
+void TerrainAwareWindField::refreshNoise()
+{
+    double speed = params_.baseSpeed_mps;
+    double dir = params_.baseDir_deg;
+
+    if (params_.noise.enabled) {
+        speed += norm_(rng_) * params_.noise.windSpeedSigma_mps;
+        dir += norm_(rng_) * params_.noise.windDirSigma_deg;
+    }
+
+    effSpeed_mps_ = std::max(0.0, speed);
+    setDirectionFromDeg(dir);
+    nextNoiseUpdateT_ = t_ + std::max(1.0e-6, params_.noise.updateEvery_s);
+}
+
+double TerrainAwareWindField::representativeSpeed() const
+{
+    return effSpeed_mps_ * std::clamp(1.0 + params_.ridgeSpeedupGain, 1.0, 2.0);
+}
+
+WindSample TerrainAwareWindField::sample(double x, double y, double z) const
+{
+    WindSample out;
+    if (!terrain_) {
+        return out;
+    }
+
+    const double ground = terrain_->heightBilinear(x, y);
+    const double zAgl = std::max(0.0, z - ground);
+
+    const double blendH = std::max(0.25, params_.blendHeight_m);
+    const double verticalFactor = std::clamp(
+        0.25 + 0.75 * (1.0 - std::exp(-zAgl / blendH)),
+        0.25,
+        1.0);
+
+    double fx = dirX_;
+    double fy = dirY_;
+
+    double dzdx = 0.0;
+    double dzdy = 0.0;
+    terrain_->gradient(x, y, dzdx, dzdy);
+
+    const double slopeMag = std::hypot(dzdx, dzdy);
+    if (slopeMag > 1.0e-12) {
+        const double nx = dzdx / slopeMag;
+        const double ny = dzdy / slopeMag;
+
+        const double intoSlope = std::max(0.0, fx * nx + fy * ny);
+        fx -= params_.slopeSlipGain * intoSlope * nx;
+        fy -= params_.slopeSlipGain * intoSlope * ny;
+
+        double fn = std::hypot(fx, fy);
+        if (fn < 1.0e-12) {
+            double tx = -ny;
+            double ty = nx;
+            if (tx * dirX_ + ty * dirY_ < 0.0) {
+                tx = -tx;
+                ty = -ty;
+            }
+            fx = tx;
+            fy = ty;
+            fn = std::hypot(fx, fy);
+        }
+        fx /= fn;
+        fy /= fn;
+    }
+
+    const double terrainSpeedup = std::clamp(
+        1.0 + params_.ridgeSpeedupGain * std::min(1.0, slopeMag),
+        0.5,
+        2.0);
+
+    const double speed = effSpeed_mps_ * verticalFactor * terrainSpeedup;
+    out.u = speed * fx;
+    out.v = speed * fy;
+    out.w = 0.0;
+    out.speed = std::hypot(out.u, out.v);
+    out.dirDeg = wrapAngleDeg(rad2deg(std::atan2(out.v, out.u)));
+    return out;
+}
+</file>
+
+<file path="WindField.h">
+#pragma once
+#include <algorithm>
+#include <cmath>
+#include <random>
+#include <string>
+
+#include "Grid3D.h"
+#include "TerrainSampler.h"
+
+struct WindSample
+{
+    double u = 0.0;
+    double v = 0.0;
+    double w = 0.0;
+    double speed = 0.0;
+    double dirDeg = 0.0;
+};
+
+class IWindField
+{
+public:
+    virtual ~IWindField() = default;
+
+    virtual bool initialize(const Grid3D& grid, const TerrainSampler* terrain, std::string& err) = 0;
+    virtual void reset() = 0;
+    virtual void advance(double dt) = 0;
+    virtual WindSample sample(double x, double y, double z) const = 0;
+
+    virtual double representativeSpeed() const = 0;
+    virtual double currentDirectionDeg() const = 0;
+    virtual double time() const = 0;
+};
+
+class TerrainAwareWindField final : public IWindField
+{
+public:
+    struct NoiseParams
+    {
+        bool enabled = true;
+        unsigned int seed = 42;
+        double updateEvery_s = 1.0;
+        double windSpeedSigma_mps = 0.30;
+        double windDirSigma_deg = 7.0;
+    };
+
+    struct Params
+    {
+        double baseSpeed_mps = 2.0;
+        double baseDir_deg = 0.0;
+        double blendHeight_m = 6.0;
+        double slopeSlipGain = 0.90;
+        double ridgeSpeedupGain = 0.30;
+        NoiseParams noise;
+    };
+
+    TerrainAwareWindField() = default;
+    explicit TerrainAwareWindField(const Params& p) : params_(p) {}
+
+    void setParams(const Params& p) { params_ = p; }
+    const Params& params() const { return params_; }
+
+    bool initialize(const Grid3D& grid, const TerrainSampler* terrain, std::string& err) override;
+    void reset() override;
+    void advance(double dt) override;
+    WindSample sample(double x, double y, double z) const override;
+
+    double representativeSpeed() const override;
+    double currentDirectionDeg() const override { return effDir_deg_; }
+    double time() const override { return t_; }
+
+private:
+    static double deg2rad(double d);
+    static double rad2deg(double r);
+    static double wrapAngleDeg(double a);
+
+    void refreshNoise();
+    void setDirectionFromDeg(double deg);
+
+private:
+    Grid3D grid_{};
+    const TerrainSampler* terrain_{nullptr};
+    Params params_{};
+
+    double t_{0.0};
+    double nextNoiseUpdateT_{0.0};
+
+    double effSpeed_mps_{0.0};
+    double effDir_deg_{0.0};
+    double dirX_{1.0};
+    double dirY_{0.0};
+
+    std::mt19937 rng_{};
+    std::normal_distribution<double> norm_{0.0, 1.0};
+};
+</file>
+
+</files>
