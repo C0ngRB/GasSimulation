@@ -9,6 +9,7 @@
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QScrollArea>
+#include <QtWidgets/QGroupBox>
 #include <QTimer>
 #include <QString>
 
@@ -57,9 +58,24 @@ private:
 
     QDoubleSpinBox* sbFlatZ_{nullptr};
 
+    QComboBox* cbProcShape_{nullptr};
+    QGroupBox* gbProcGaussian_{nullptr};
+    QGroupBox* gbProcSombrero_{nullptr};
+    QGroupBox* gbProcSphereCap_{nullptr};
+
     QDoubleSpinBox* sbProcBaseZ_{nullptr};
     QDoubleSpinBox* sbProcPeakA_{nullptr};
     QDoubleSpinBox* sbProcSigma_{nullptr};
+
+    QDoubleSpinBox* sbProcSombreroBaseZ_{nullptr};
+    QDoubleSpinBox* sbProcSombreroAmp_{nullptr};
+    QDoubleSpinBox* sbProcSombreroRadius_{nullptr};
+
+    QDoubleSpinBox* sbCapBaseZ_{nullptr};
+    QDoubleSpinBox* sbCapCenterX_{nullptr};
+    QDoubleSpinBox* sbCapCenterY_{nullptr};
+    QDoubleSpinBox* sbCapHeight_{nullptr};
+    QDoubleSpinBox* sbCapRadius_{nullptr};
 
     QPushButton* btnPreviewTerrain_{nullptr};
 
@@ -146,6 +162,7 @@ private:
 
     TerrainMode terrainMode() const;
     const ITerrain* currentTerrain() const;
+    void updateProcShapeUi();
 
     void updateDomainInfo();
     bool buildTerrainPreview(QString& errOut);

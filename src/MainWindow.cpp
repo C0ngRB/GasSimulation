@@ -126,6 +126,9 @@ void MainWindow::startExperimentLogSession()
         ts << "- 开始时间：`" << currentExperimentStartMinute_ << "`\n";
         ts << "- 计算模型：`" << cbModel_->currentText() << "`\n";
         ts << "- 地形模式：`" << cbTerrainMode_->currentText() << "`\n";
+        if (terrainMode() == TerrainMode::Procedural && cbProcShape_) {
+            ts << "- 程序地形形状：`" << cbProcShape_->currentText() << "`\n";
+        }
         ts << "- 日志文件：`" << currentExperimentLogPath_ << "`\n\n";
         ts << "## 事件记录\n\n";
     }
@@ -156,6 +159,25 @@ void MainWindow::updateDomainInfo()
     const int Nx = std::max(2, static_cast<int>(std::floor(Lx / dx)) + 1);
     const int Ny = std::max(2, static_cast<int>(std::floor(Ly / dy)) + 1);
     domainInfo_->setText(QString("Nx=%1 Ny=%2 (non-DEM)").arg(Nx).arg(Ny));
+}
+
+void MainWindow::updateProcShapeUi()
+{
+    const bool procSelected = (terrainMode() == TerrainMode::Procedural);
+    if (cbProcShape_) {
+        cbProcShape_->setEnabled(procSelected);
+    }
+
+    const int shape = cbProcShape_ ? cbProcShape_->currentIndex() : 0;
+    if (gbProcGaussian_) {
+        gbProcGaussian_->setVisible(procSelected && shape == 0);
+    }
+    if (gbProcSombrero_) {
+        gbProcSombrero_->setVisible(procSelected && shape == 1);
+    }
+    if (gbProcSphereCap_) {
+        gbProcSphereCap_->setVisible(procSelected && shape == 2);
+    }
 }
 
 void MainWindow::enforceSourceCenterIfNeeded()
@@ -301,12 +323,45 @@ MainWindow::MainWindow(QWidget* parent)
     sbFlatZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
     terrainForm->addRow("Flat z", sbFlatZ_);
 
+    cbProcShape_ = new QComboBox(gbTerrain);
+    cbProcShape_->addItem("Gaussian hill");
+    cbProcShape_->addItem("Sombrero");
+    cbProcShape_->addItem("Sphere cap");
+    terrainForm->addRow("Procedural shape", cbProcShape_);
+
+    gbProcGaussian_ = new QGroupBox("Gaussian hill parameters", gbTerrain);
+    auto* procGaussianForm = new QFormLayout(gbProcGaussian_);
     sbProcBaseZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
     sbProcPeakA_ = makeDsb(0, 1000, 1.0, 100.0, 2);
     sbProcSigma_ = makeDsb(1, 100000, 1.0, 200.0, 2);
-    terrainForm->addRow("Proc base z", sbProcBaseZ_);
-    terrainForm->addRow("Proc peak A", sbProcPeakA_);
-    terrainForm->addRow("Proc sigma", sbProcSigma_);
+    procGaussianForm->addRow("Base z", sbProcBaseZ_);
+    procGaussianForm->addRow("Peak A", sbProcPeakA_);
+    procGaussianForm->addRow("Sigma", sbProcSigma_);
+    terrainForm->addRow(gbProcGaussian_);
+
+    gbProcSombrero_ = new QGroupBox("Sombrero parameters", gbTerrain);
+    auto* procSombreroForm = new QFormLayout(gbProcSombrero_);
+    sbProcSombreroBaseZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
+    sbProcSombreroAmp_ = makeDsb(0, 1000, 1.0, 100.0, 2);
+    sbProcSombreroRadius_ = makeDsb(1, 100000, 1.0, 200.0, 2);
+    procSombreroForm->addRow("Base z", sbProcSombreroBaseZ_);
+    procSombreroForm->addRow("Amplitude", sbProcSombreroAmp_);
+    procSombreroForm->addRow("Radius", sbProcSombreroRadius_);
+    terrainForm->addRow(gbProcSombrero_);
+
+    gbProcSphereCap_ = new QGroupBox("Sphere cap parameters", gbTerrain);
+    auto* procSphereCapForm = new QFormLayout(gbProcSphereCap_);
+    sbCapBaseZ_ = makeDsb(-1000, 10000, 0.5, 0.0, 2);
+    sbCapCenterX_ = makeDsb(-1e6, 1e6, 1.0, 0.0, 2);
+    sbCapCenterY_ = makeDsb(-1e6, 1e6, 1.0, 0.0, 2);
+    sbCapHeight_ = makeDsb(0.1, 100000, 1.0, 60.0, 2);
+    sbCapRadius_ = makeDsb(0.1, 100000, 1.0, 80.0, 2);
+    procSphereCapForm->addRow("Base z", sbCapBaseZ_);
+    procSphereCapForm->addRow("Center X", sbCapCenterX_);
+    procSphereCapForm->addRow("Center Y", sbCapCenterY_);
+    procSphereCapForm->addRow("Cap height", sbCapHeight_);
+    procSphereCapForm->addRow("Cap radius", sbCapRadius_);
+    terrainForm->addRow(gbProcSphereCap_);
 
     btnPreviewTerrain_ = new QPushButton("Preview Terrain", gbTerrain);
     terrainForm->addRow(btnPreviewTerrain_);
@@ -333,6 +388,9 @@ MainWindow::MainWindow(QWidget* parent)
     domForm->addRow(domainInfo_);
 
     leftLayout->addWidget(gbDomain);
+
+    sbCapCenterX_->setValue(sbX0_->value() + 0.5 * sbLx_->value());
+    sbCapCenterY_->setValue(sbY0_->value() + 0.5 * sbLy_->value());
 
     auto* gbZ = new QGroupBox("Vertical", leftInner);
     auto* zForm = new QFormLayout(gbZ);
@@ -464,12 +522,30 @@ MainWindow::MainWindow(QWidget* parent)
     connect(btnConvertLoadDem_, &QPushButton::clicked, this, &MainWindow::onConvertLoadDemClicked);
     connect(btnPreviewTerrain_, &QPushButton::clicked, this, &MainWindow::onPreviewTerrainClicked);
 
-    connect(cbTerrainMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(cbTerrainMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        updateProcShapeUi();
+        onTerrainParamsChanged();
+    });
+
+    connect(cbProcShape_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        updateProcShapeUi();
+        onTerrainParamsChanged();
+    });
 
     connect(sbFlatZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
     connect(sbProcBaseZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
     connect(sbProcPeakA_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
     connect(sbProcSigma_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+
+    connect(sbProcSombreroBaseZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbProcSombreroAmp_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbProcSombreroRadius_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+
+    connect(sbCapBaseZ_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbCapCenterX_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbCapCenterY_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbCapHeight_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
+    connect(sbCapRadius_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
 
     connect(sbX0_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
     connect(sbY0_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onTerrainParamsChanged);
@@ -508,6 +584,7 @@ MainWindow::MainWindow(QWidget* parent)
     timer_->setInterval(15);
     connect(timer_, &QTimer::timeout, this, &MainWindow::onTick);
 
+    updateProcShapeUi();
     updateDomainInfo();
     appendLog("[Init] ready. Click Preview Terrain first.");
 }
@@ -572,6 +649,7 @@ void MainWindow::onConvertLoadDemClicked()
 void MainWindow::onTerrainParamsChanged()
 {
     flat_.z = static_cast<float>(sbFlatZ_->value());
+    updateProcShapeUi();
 
     const double x0 = sbX0_->value();
     const double y0 = sbY0_->value();
@@ -580,9 +658,26 @@ void MainWindow::onTerrainParamsChanged()
     const double xc = x0 + 0.5 * Lx;
     const double yc = y0 + 0.5 * Ly;
 
-    proc_.setMode(TerrainProcedural::Mode::GaussianHill);
-    proc_.setBaseZ(static_cast<float>(sbProcBaseZ_->value()));
-    proc_.setGaussian(TerrainProcedural::Gaussian{xc, yc, sbProcPeakA_->value(), sbProcSigma_->value()});
+    const int procShape = cbProcShape_ ? cbProcShape_->currentIndex() : 0;
+    if (procShape == 0) {
+        proc_.setMode(TerrainProcedural::Mode::GaussianHill);
+        proc_.setBaseZ(static_cast<float>(sbProcBaseZ_->value()));
+        proc_.setGaussian(TerrainProcedural::Gaussian{xc, yc, sbProcPeakA_->value(), sbProcSigma_->value()});
+    } else if (procShape == 1) {
+        proc_.setSombrero(
+            sbProcSombreroBaseZ_->value(),
+            sbProcSombreroAmp_->value(),
+            sbProcSombreroRadius_->value(),
+            xc,
+            yc);
+    } else {
+        proc_.setSphereCap(
+            sbCapBaseZ_->value(),
+            sbCapCenterX_->value(),
+            sbCapCenterY_->value(),
+            sbCapHeight_->value(),
+            sbCapRadius_->value());
+    }
 
     running_ = false;
     timer_->stop();
