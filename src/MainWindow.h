@@ -96,6 +96,7 @@ private:
     QComboBox* cbModel_{nullptr};
     QDoubleSpinBox* sbWindSpeed_{nullptr};
     QDoubleSpinBox* sbWindDir_{nullptr};
+    QDoubleSpinBox* sbWindDirSigma_{nullptr};   // 新增：风向抖动 sigma
     QDoubleSpinBox* sbK_{nullptr};
     QDoubleSpinBox* sbDecay_{nullptr};
 
@@ -112,6 +113,7 @@ private:
     QDoubleSpinBox* sbSrcZ_{nullptr};
     QDoubleSpinBox* sbSrcRadius_{nullptr};
     QDoubleSpinBox* sbLeak_{nullptr};
+    QDoubleSpinBox* sbLeakJitterSigma_{nullptr}; // 新增：源强度抖动 sigma
     QDoubleSpinBox* sbAgl_{nullptr};
     QPushButton* btnSetSrcZFromGround_{nullptr};
     QCheckBox* cbAutoCenterSrc_{nullptr};

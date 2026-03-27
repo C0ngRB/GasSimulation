@@ -129,6 +129,11 @@ void MainWindow::startExperimentLogSession()
         if (terrainMode() == TerrainMode::Procedural && cbProcShape_) {
             ts << "- 程序地形形状：`" << cbProcShape_->currentText() << "`\n";
         }
+        ts << "- 风速：`" << sbWindSpeed_->value() << " m/s`\n";
+        ts << "- 风向：`" << sbWindDir_->value() << " deg`\n";
+        ts << "- 风向抖动σ：`" << sbWindDirSigma_->value() << " deg`\n";
+        ts << "- 源强度：`" << sbLeak_->value() << " kg/s`\n";
+        ts << "- 源强度抖动σ：`" << sbLeakJitterSigma_->value() << " (relative)`\n";
         ts << "- 日志文件：`" << currentExperimentLogPath_ << "`\n\n";
         ts << "## 事件记录\n\n";
     }
@@ -421,12 +426,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     sbWindSpeed_ = makeDsb(0.0, 100.0, 0.1, 2.0, 2);
     sbWindDir_   = makeDsb(0.0, 360.0, 1.0, 0.0, 1);
+    sbWindDirSigma_ = makeDsb(0.0, 180.0, 0.5, 7.0, 2);
     sbK_         = makeDsb(0.0, 1000.0, 0.01, 2.0, 4);
     sbDecay_     = makeDsb(0.0, 10.0, 0.001, 0.0, 6);
 
     physForm->addRow("Model", cbModel_);
     physForm->addRow("Wind speed (m/s)", sbWindSpeed_);
     physForm->addRow("Wind dir (deg)", sbWindDir_);
+    physForm->addRow("Wind dir jitter σ (deg)", sbWindDirSigma_);
     physForm->addRow("K (m^2/s)", sbK_);
     physForm->addRow("Decay (1/s)", sbDecay_);
 
@@ -481,6 +488,7 @@ MainWindow::MainWindow(QWidget* parent)
     sbSrcZ_ = makeDsb(-1e12, 1e12, 0.5, 2.0, 2);
     sbSrcRadius_ = makeDsb(0.01, 1000.0, 0.05, 1.0, 2);
     sbLeak_ = makeDsb(0.0, 1e9, 1.0, 100.0, 2);
+    sbLeakJitterSigma_ = makeDsb(0.0, 2.0, 0.01, 0.10, 3);
     sbAgl_  = makeDsb(0.0, 20000.0, 0.5, 2.0, 2);
 
     btnSetSrcZFromGround_ = new QPushButton("Set srcZ = ground + AGL", gbSrc);
@@ -493,6 +501,7 @@ MainWindow::MainWindow(QWidget* parent)
     srcForm->addRow("srcZ", sbSrcZ_);
     srcForm->addRow("srcRadius", sbSrcRadius_);
     srcForm->addRow("Leak strength", sbLeak_);
+    srcForm->addRow("Leak jitter σ (relative)", sbLeakJitterSigma_);
     srcForm->addRow("AGL slice (m)", sbAgl_);
     srcForm->addRow(btnSetSrcZFromGround_);
     srcForm->addRow(cbAutoCenterSrc_);
@@ -855,8 +864,8 @@ SimulationConfig MainWindow::readSimConfig() const
     p.noise.seed = 42;
     p.noise.updateEvery_s = 1.0;
     p.noise.windSpeedSigma_mps = 0.30;
-    p.noise.windDirSigma_deg = 7.0;
-    p.noise.leakRelSigma = 0.10;
+    p.noise.windDirSigma_deg = sbWindDirSigma_->value();
+    p.noise.leakRelSigma = sbLeakJitterSigma_->value();
 
     return p;
 }
